@@ -243,3 +243,151 @@ A escolha do inimigo mais próximo e o cálculo do ângulo usam só `UnitState` 
 - `InputManager` não importa `src/game/`. A seleção compara os acertos do raio com respostas do motor.
 - O critério de "inimigo mais próximo" para a orientação é cosmético e pode ficar no renderer. Se uma regra futura depender de orientação, ela passa para o motor e para o contrato.
 - Os três módulos puros novos não importam Three.js nem acessam o DOM, para poderem ser testados em Node junto com o motor.
+
+# V2.3: sete melhorias de combate, interface e mapas
+
+## Escopo e status
+
+Esta seção é diagnóstico e desenho. Só os contratos em `src/shared/types.ts` já foram alterados; `src/game/`, `src/rendering/`, `src/ui/`, `src/input/`, `src/config/` e `tests/` ainda não. Por isso `npm run typecheck` acusa hoje que `GameEngine` não implementa os métodos e campos novos; o erro some quando o motor for atualizado. O diagnóstico vem da leitura do código, sem rodar o jogo no navegador.
+
+| # | Melhoria | Camadas |
+|---|---|---|
+| 1 | Arcane Burst com um projétil e uma explosão central | renderização |
+| 2 | Atalho `E` para encerrar o turno | HUD |
+| 3 | Opacidade 1,0 na unidade ativa e 0,75 nas demais vivas | renderização, `main.ts` |
+| 4 | Ataque inteligente com o menor deslocamento | contrato, motor, input, destaques |
+| 5 | Desfazer o movimento, uma vez por ativação | contrato, motor, HUD, renderização |
+| 6 | Posições iniciais sorteadas nas duas primeiras linhas, com semente | contrato, config, motor |
+| 7 | Três mapas, sorteados sem repetir o anterior | contrato, config, motor, `main.ts`, HUD |
+
+## Contratos adicionados
+
+Tudo em `src/shared/types.ts`, com os detalhes nos comentários de cada item.
+
+| Item | O que é |
+|---|---|
+| `MapConfig` | `id`, `name`, `gridSize`, `obstacles`, `playerSpawnRows`, `enemySpawnRows` |
+| `SmartActionPlan` | `{ path }`: o que o ataque ou a habilidade inteligente faria agora |
+| `GameStateSnapshot.mapId`, `mapName` | Mapa sorteado para a batalha |
+| `GameStateSnapshot.seed` | Semente que gerou o mapa e as posições iniciais |
+| `GameStateSnapshot.canUndoMove` | `undoMove()` seria aceito agora |
+| Evento `moveUndone` | `{ unitId, path }`, com `path` da célula atual de volta à de origem |
+| `undoMove()` | Desfaz o movimento da ativação |
+| `smartAttack(targetId)` | Ataca; se preciso, anda antes pelo menor caminho |
+| `smartUseSkill(targetCell)` | O mesmo para a habilidade |
+| `getSmartAttackPlan(targetId)`, `getSmartSkillPlan(targetCell)` | Consultas puras para a interface mostrar o plano antes do clique |
+
+Três itens vão além do pedido original e ficam para a coordenação confirmar: `seed` no snapshot, `SmartActionPlan` e as duas consultas de plano. Sem as consultas, a interface teria de recalcular alcance e caminho para mostrar a prévia, o que as regras de camada proíbem.
+
+O comentário de `reset()` também mudou: ele agora sorteia outro mapa, então a interface precisa reconstruir o tabuleiro.
+
+## 1. Arcane Burst: um projétil e uma explosão
+
+### Diagnóstico
+
+O motor está correto. `resolveSkill` (`CombatSystem.ts:109`) emite um `skillUsed` com a célula alvo e, em seguida, um `unitAttacked` por inimigo atingido, cada um com `isRanged: true` e `skillId: 'arcane-burst'`.
+
+O defeito está em `UnitRenderer.enqueueEvents`, que transforma cada evento em uma animação independente, na ordem em que chegam:
+
+- **`skillUsed` vira a explosão, e ela toca primeiro** (`UnitRenderer.ts:184-197`). A animação `skillVfx` desenha o anel e o orbe na célula alvo antes de qualquer projétil sair do mago.
+- **Cada `unitAttacked` vira um projétil próprio** (`:198-222`). Como o evento tem `isRanged`, entra na fila um `rangedAttack` do mago até aquele inimigo. O campo `skillId` só é usado para escolher a cor.
+- **A fila toca uma animação por vez.** Com três inimigos na área, o jogador vê a explosão no centro e depois três projéteis, um após o outro, cada um aplicando o dano do seu alvo.
+
+O esperado é o inverso: um projétil do mago até o centro, a explosão no impacto e o dano em todos os atingidos ao mesmo tempo. O Marked Shot tem a mesma inversão em menor grau: a mira aparece no alvo antes de a flecha sair.
+
+### Desenho
+
+- **Agrupar os eventos da habilidade antes de enfileirar.** Ao encontrar um `skillUsed`, o renderer consome os `unitAttacked` seguintes que tenham o mesmo `skillId` e `attackerId` igual ao `casterId`, e monta uma única animação composta.
+- **Animação composta para habilidade à distância:** projétil do lançador até `targetCell`; no impacto, o efeito da habilidade (a explosão em cruz do Arcane Burst, a mira do Marked Shot); no mesmo instante, a reação de dano e a barra de HP de todos os atingidos.
+- **Habilidade corpo a corpo** (Runic Strike, `isRanged` falso) continua com a animação de golpe atual.
+- **As mortes vêm depois.** Os `unitDied` intercalados entram na fila só depois da animação composta, na ordem recebida.
+- **Barras de HP.** `isPendingAttackTarget` precisa reconhecer a animação composta, para a barra dos atingidos não cair antes do impacto.
+- **Garantia do motor que isso usa:** os eventos de uma habilidade são contíguos e chegam no mesmo lote de `consumeEvents()`. Isso já é verdade, porque `useSkill` é síncrono, e passa a ser parte do contrato.
+
+O agrupamento não precisa de Three.js: recebe `GameEvent[]` e devolve descrições de animação. Ele vai para um módulo próprio, por exemplo `src/rendering/eventGrouping.ts`, testado em Node.
+
+## 2. Atalho `E`
+
+- **Estado atual:** o botão diz "Encerrar Turno" (`HudManager.ts:107`) e só responde a clique (`:150`). Não há nenhum ouvinte de teclado no projeto.
+- **Desenho:** `HudManager` registra um `keydown` na janela e chama o mesmo `callbacks.onEndTurn()` do clique. Assim as travas existentes continuam valendo: a de animação em `main.ts:45-46` e a recusa do motor fora da vez do jogador.
+- **Quando o atalho é ignorado:** botão desabilitado, tela de resultado aberta, `event.repeat`, Ctrl, Alt ou Meta pressionados, ou foco em campo de texto.
+- **Tecla:** comparar `event.key` em minúscula com `e`, para respeitar o layout do teclado.
+- **Rótulo:** "Encerrar turno (E)", com `aria-keyshortcuts="E"`. O ouvinte é removido em `dispose()`.
+
+## 3. Opacidade da unidade ativa
+
+- **Estado atual:** os materiais do corpo são opacos. Cada unidade cria os seus (`UnitRenderer.ts`, funções `build*`), então a opacidade pode variar por unidade. `syncUnits` recebe a unidade selecionada, mas não a ativa; durante a vez inimiga a seleção é nula.
+- **Regra:**
+
+| Situação | Opacidade do corpo |
+|---|---|
+| Unidade viva com a ativação aberta (`activeUnitId`) | 1,0 |
+| Demais unidades vivas, dos dois times | 0,75 |
+| Batalha encerrada, sem unidade ativa | 1,0 para todas as vivas |
+| Cadáveres | Sem mudança |
+
+- **Desenho:** `syncUnits` passa a receber `activeUnitId`. Cada `UnitVisual` guarda a lista de materiais do corpo, coletada na criação. Ao aplicar a opacidade, ajustar `transparent` e `opacity`, e marcar `needsUpdate` quando `transparent` mudar. O anel da base e a barra de HP não mudam.
+- **Os dois valores ficam em uma constante nomeada**, em um só lugar.
+- **Risco visual:** material translúcido deixa ver o piso e as partes internas do modelo, e entra na ordenação de transparentes. Manter `depthWrite` ligado reduz o problema, mas ele precisa ser conferido no navegador, em vários ângulos de câmera.
+
+## 4. Ataque inteligente
+
+### Regra, implementada só no motor
+
+1. Valem as recusas de `attackTarget`: não é a vez do jogador, a unidade já atacou, o alvo não existe, está morto ou é aliado.
+2. Se o alvo já pode ser atacado de onde a unidade está, ataca. O movimento não é gasto.
+3. Senão, se a unidade já se moveu, recusa.
+4. Senão, entre as células alcançáveis nesta ativação, ficam as de onde o ataque vale: dentro do alcance e, para alcance acima de 1, com linha de visão.
+5. A escolhida é a de menor custo de movimento. No empate, a de menor distância de Manhattan até o alvo. Persistindo, a de menor `y` e depois menor `x`.
+6. Sem candidata, recusa. Com candidata, a unidade anda e ataca: `unitMoved`, `unitAttacked` e, se for o caso, `unitDied`.
+7. A checagem pós-ação roda uma vez, ao final. Com movimento e ataque gastos, a ativação termina sozinha, salvo vitória no golpe.
+
+A ação é atômica: ou acontecem o movimento e o ataque, ou nada muda e nenhum evento sai. O custo de movimento é o número de passos do menor caminho, porque todo passo custa 1.
+
+`smartUseSkill` segue a mesma sequência, trocando "ataque vale" por "`targetCell` é alvo válido da habilidade a partir daquela célula" e medindo a distância até `targetCell`. Para isso, a validação de alvo de habilidade em `CombatSystem` precisa aceitar a posição do lançador como parâmetro, em vez de ler `caster.pos`.
+
+### Interface
+
+- **Clique.** No modo padrão e no modo de ataque, clicar em um inimigo chama `smartAttack`. No modo de habilidade, clicar em uma célula chama `smartUseSkill`.
+- **Prévia obrigatória.** O ataque inteligente anda e ataca em um clique, sem volta. No hover, a interface consulta `getSmartAttackPlan` ou `getSmartSkillPlan` e desenha o caminho e a célula de destino antes do clique.
+- **Destaque.** Um inimigo que só é atacável depois de andar recebe um destaque diferente do inimigo atacável de onde a unidade está. A lista vem de `getSmartAttackPlan` chamado para cada inimigo vivo.
+- **Sem regra na interface.** `InputManager` não escolhe a célula nem calcula caminho.
+
+## 5. Desfazer o movimento
+
+- **O motor guarda o último movimento manual** da ativação: unidade, célula de origem e caminho. O registro é apagado ao atacar, ao usar habilidade, ao encerrar a ativação e no `reset()`.
+- **`undoMove()`** devolve a unidade à origem, põe `hasMoved` em `false` e emite `moveUndone` com o caminho de volta. Não encerra a ativação e não muda mais nada.
+- **Uma vez por ativação.** Depois de desfazer, a unidade pode se mover de novo, mas esse segundo movimento é definitivo.
+- **Quando não vale:** fora da vez do jogador; sem movimento feito; depois de atacar ou usar habilidade; quando o movimento veio de `smartAttack` ou `smartUseSkill`; quando o desfazer já foi usado. `canUndoMove` no snapshot resume essas condições.
+- **Por que é seguro:** o movimento não revela informação, não sorteia nada e não dispara reação inimiga, então voltar atrás não dá vantagem.
+- **Atacar e depois mover** encerra a ativação na hora, então nesse caso não há o que desfazer.
+- **Interface:** um botão "Desfazer movimento", habilitado por `canUndoMove` e fora de animação. `moveUndone` é animado como um movimento pelo caminho recebido, e a unidade se reorienta ao final como depois de qualquer movimento.
+
+## 6. Posições iniciais sorteadas
+
+- **Estado atual:** `INITIAL_UNITS` em `gameConfig.ts` fixa a posição de cada unidade.
+- **Desenho:** a lista de unidades passa a trazer só id, tipo e time. Cada mapa declara `playerSpawnRows` e `enemySpawnRows`: as duas linhas do sul para os heróis e as duas do norte para os inimigos.
+- **Sorteio:** para cada unidade, na ordem da lista, o motor sorteia uma célula entre as livres das linhas do seu time. Livre significa sem obstáculo e ainda não sorteada.
+- **Semente.** Todo sorteio do motor sai de um gerador com semente, em um módulo próprio de `src/game/`. A mesma semente produz o mesmo mapa e as mesmas posições. Sem semente informada, o motor gera uma; é o único ponto em que usa uma fonte não determinística.
+- **Ordem de consumo do gerador:** mapa, depois heróis na ordem da lista, depois inimigos na ordem da lista. Mudar essa ordem muda o resultado de uma semente, então ela é parte do contrato.
+- **Reinício.** O gerador continua de onde parou. Uma semente inicial fixa produz sempre a mesma sequência de batalhas, o que os testes usam.
+- **Cenários de teste.** Um cenário que informa posições explícitas não passa pelo sorteio. Os testes atuais, que montam situações exatas, continuam valendo.
+- **A ordem de turno não muda:** ela depende dos ids, não das posições.
+
+## 7. Três mapas
+
+- **Config:** `MAPS: MapConfig[]` em `gameConfig.ts`, com "Ruínas Atuais" (os obstáculos de hoje), "Fortaleza Abandonada" e "Pátio das Ruínas". Os traçados propostos estão em `game-design.md`.
+- **Restrições de todo mapa**, conferidas por teste: grade 12×12; linhas de nascimento sem obstáculo; todas as células livres ligadas entre si; nenhum obstáculo duplicado.
+- **A grade fica em 12×12 nos três.** O enquadramento da câmera, as tochas e o perímetro em `SceneManager` e `BoardRenderer` foram dimensionados para esse tamanho. `MapConfig.gridSize` existe para o futuro.
+- **Sorteio sem repetição:** a cada batalha nova, o motor sorteia entre os mapas diferentes do anterior. Na primeira batalha, qualquer um serve.
+- **Entre recarregamentos da página** o motor não lembra o mapa anterior. Se a coordenação quiser a garantia também nesse caso, `main.ts` guarda o último `mapId` no armazenamento do navegador e o informa ao criar o motor. Fica como decisão em aberto.
+- **Interface:** `main.ts` hoje constrói o tabuleiro uma única vez (`main.ts:203`) e não o refaz no reinício (`main.ts:55-60`). Com mapas sorteados, ele precisa chamar `buildBoard` de novo quando recebe `gameReset`. `buildBoard` já remove as malhas antigas, mas não libera geometrias e materiais; isso precisa ser corrigido para não acumular memória a cada reinício.
+- **HUD:** mostra `mapName`.
+
+## Limites de camada na V2.3
+
+- A escolha da célula do ataque inteligente, a validade do desfazer, o sorteio de mapa e o de posições são regras: ficam em `src/game/`.
+- O motor não usa `Math.random` nas regras. Todo sorteio passa pelo gerador com semente.
+- A interface mostra a prévia a partir das consultas de plano. Ela não calcula alcance, caminho nem linha de visão.
+- O agrupamento de eventos de habilidade e a regra de opacidade são apresentação: ficam no renderer.
+- O atalho de teclado chama o mesmo caminho do botão, para não haver duas versões das travas.

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { INITIAL_UNITS, OBSTACLES } from '../src/config/gameConfig';
+import { INITIAL_UNITS, MAPS, OBSTACLES } from '../src/config/gameConfig';
 import { GameEngine } from '../src/game/GameEngine';
 import { manhattan } from '../src/game/grid/GridSystem';
 import type { GameEvent } from '../src/shared/types';
@@ -54,9 +54,10 @@ describe('GameEngine: estado inicial e turnOrder fixo (V2.1)', () => {
       'skeleton-archer-1',
       'cultist-mage-1',
     ]);
-    expect(state.units.map((u) => [u.id, u.type, u.team, u.pos])).toEqual(
-      INITIAL_UNITS.map((s) => [s.id, s.type, s.team, s.pos]),
+    expect(state.units.map((u) => [u.id, u.type, u.team])).toEqual(
+      INITIAL_UNITS.map((s) => [s.id, s.type, s.team]),
     );
+    expect(MAPS.some((m) => m.id === state.mapId && m.name === state.mapName)).toBe(true);
     expect(engine.consumeEvents()).toEqual([]);
   });
 
@@ -89,7 +90,7 @@ describe('GameEngine: estado inicial e turnOrder fixo (V2.1)', () => {
   });
 
   it('expõe os obstáculos e garante cópias isoladas em getState', () => {
-    const engine = new GameEngine();
+    const engine = new GameEngine({ mapId: 'ruins', randomizeSpawns: false });
     const state = engine.getState();
     expect(state.obstacleDefs).toEqual(OBSTACLES);
     state.units[0].pos.x = 11;

@@ -30,3 +30,19 @@ All AI-generated assets were produced via the Gemini `image-generator` subagent 
 | Arcane Burst | `public/assets/icons/arcane-burst.svg` | Custom SVG fallback (`gemini-3.1-flash-image` 429 quota exhausted) | Created & Integrated |
 | Basic Attack | `public/assets/icons/basic-attack.svg` | Custom SVG fallback (`gemini-3.1-flash-image` 429 quota exhausted) | Created & Integrated |
 | Move | `public/assets/icons/move.svg` | Custom SVG fallback (`gemini-3.1-flash-image` 429 quota exhausted) | Created & Integrated |
+
+## 3D Models (KayKit CC0 1.0)
+
+Source: [KayKit-Game-Assets (GitHub)](https://github.com/KayKit-Game-Assets). These models are third-party assets, not AI-generated. License: CC0 1.0.
+
+| Asset | File |
+|---|---|
+| Knight | `public/assets/models/Knight.glb` |
+| Mage | `public/assets/models/Mage.glb` |
+| Rogue | `public/assets/models/Rogue.glb` |
+| Hooded Rogue | `public/assets/models/Rogue_Hooded.glb` |
+| Skeleton Minion | `public/assets/models/Skeleton_Minion.glb` |
+| Skeleton Rogue | `public/assets/models/Skeleton_Rogue.glb` |
+| Skeleton Warrior | `public/assets/models/Skeleton_Warrior.glb` |
+| Skeleton Mage | `public/assets/models/Skeleton_Mage.glb` |
+| License | `public/assets/models/LICENSE-KayKit-CC0.txt` |

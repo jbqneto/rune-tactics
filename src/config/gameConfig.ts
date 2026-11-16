@@ -55,6 +55,92 @@ export const OBSTACLES: ObstacleDef[] = [
   ]),
 ];
 
+export interface MapConfig {
+  id: string;
+  name: string;
+  gridSize: number;
+  obstacles: ObstacleDef[];
+  playerSpawnRows: [number, number];
+  enemySpawnRows: [number, number];
+}
+
+export const MAPS: MapConfig[] = [
+  {
+    id: 'ruins',
+    name: 'Ruínas Atuais',
+    gridSize: GRID_SIZE,
+    obstacles: OBSTACLES,
+    playerSpawnRows: [0, 1],
+    enemySpawnRows: [10, 11],
+  },
+  {
+    id: 'fortress',
+    name: 'Fortaleza Abandonada',
+    gridSize: GRID_SIZE,
+    obstacles: [
+      ...obstacles('wall', true, [
+        [2, 5],
+        [3, 5],
+        [4, 5],
+        [7, 5],
+        [8, 5],
+        [9, 5],
+        [2, 7],
+        [3, 7],
+        [8, 7],
+        [9, 7],
+      ]),
+      ...obstacles('pillar', true, [
+        [5, 3],
+        [6, 3],
+        [5, 8],
+        [6, 8],
+      ]),
+      ...obstacles('crate', false, [
+        [0, 5],
+        [11, 5],
+        [4, 8],
+        [7, 8],
+      ]),
+      ...obstacles('barrel', false, [
+        [1, 3],
+        [10, 3],
+      ]),
+    ],
+    playerSpawnRows: [0, 1],
+    enemySpawnRows: [10, 11],
+  },
+  {
+    id: 'courtyard',
+    name: 'Pátio das Ruínas',
+    gridSize: GRID_SIZE,
+    obstacles: [
+      ...obstacles('pillar', true, [
+        [3, 4],
+        [8, 4],
+        [3, 7],
+        [8, 7],
+      ]),
+      ...obstacles('wall', true, [
+        [5, 5],
+        [6, 5],
+      ]),
+      ...obstacles('crate', false, [
+        [1, 5],
+        [10, 6],
+        [4, 8],
+        [7, 3],
+      ]),
+      ...obstacles('barrel', false, [
+        [2, 3],
+        [9, 8],
+      ]),
+    ],
+    playerSpawnRows: [0, 1],
+    enemySpawnRows: [10, 11],
+  },
+];
+
 export interface SkillDef {
   id: SkillId;
   name: string;
@@ -165,7 +251,7 @@ export const UNIT_STATS: Record<UnitType, UnitStats> = {
     moveRange: 2,
     attackRange: 1,
     skillId: 'healing-light',
-    portraitPath: '/assets/portraits/cleric.svg',
+    portraitPath: '/assets/portraits/cleric.png',
   },
   'melee-skeleton': {
     name: 'Melee Skeleton',

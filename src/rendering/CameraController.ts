@@ -1,14 +1,14 @@
 import * as THREE from 'three';
 
 const INITIAL_AZIMUTH = Math.PI / 4;
-const CAMERA_HEIGHT_Y = 18.5;
-const CAMERA_RADIUS = Math.hypot(17, 17);
+const CAMERA_HEIGHT_Y = 12.8;
+const CAMERA_RADIUS = 20.0;
 const DRAG_THRESHOLD_PX = 4;
 const ROTATE_SENSITIVITY = 0.008;
 const SMOOTHING_FACTOR = 12;
 
 export class CameraController {
-  readonly target = new THREE.Vector3(0, 0.25, 0);
+  readonly target = new THREE.Vector3(0, 0.35, 0);
   readonly heightY = CAMERA_HEIGHT_Y;
   readonly radius = CAMERA_RADIUS;
 
@@ -27,6 +27,9 @@ export class CameraController {
   private readonly handlePointerMoveBound: (e: PointerEvent) => void;
   private readonly handlePointerUpBound: (e: PointerEvent) => void;
   private readonly handleContextMenuBound: (e: MouseEvent) => void;
+  private readonly handleWheelBound: (e: WheelEvent) => void;
+  private readonly handleGestureStartBound: (e: Event) => void;
+  private readonly handleKeyDownBound: (e: KeyboardEvent) => void;
 
   constructor(camera: THREE.Camera, canvas: HTMLElement | null = null) {
     this.camera = camera;
@@ -51,13 +54,30 @@ export class CameraController {
     this.handleContextMenuBound = (e) => {
       e.preventDefault();
     };
+    this.handleWheelBound = (e) => {
+      e.preventDefault();
+    };
+    this.handleGestureStartBound = (e) => {
+      e.preventDefault();
+    };
+    this.handleKeyDownBound = (e) => {
+      if (
+        (e.ctrlKey || e.metaKey) &&
+        (e.key === '+' || e.key === '-' || e.key === '=' || e.key === '_' || e.key === '0')
+      ) {
+        e.preventDefault();
+      }
+    };
 
     if (this.canvas) {
       this.canvas.addEventListener('pointerdown', this.handlePointerDownBound);
       this.canvas.addEventListener('contextmenu', this.handleContextMenuBound);
+      this.canvas.addEventListener('wheel', this.handleWheelBound, { passive: false });
       if (typeof window !== 'undefined') {
         window.addEventListener('pointermove', this.handlePointerMoveBound);
         window.addEventListener('pointerup', this.handlePointerUpBound);
+        window.addEventListener('gesturestart', this.handleGestureStartBound, { passive: false });
+        window.addEventListener('keydown', this.handleKeyDownBound);
       }
     }
   }
@@ -122,9 +142,12 @@ export class CameraController {
     if (this.canvas) {
       this.canvas.removeEventListener('pointerdown', this.handlePointerDownBound);
       this.canvas.removeEventListener('contextmenu', this.handleContextMenuBound);
+      this.canvas.removeEventListener('wheel', this.handleWheelBound);
       if (typeof window !== 'undefined') {
         window.removeEventListener('pointermove', this.handlePointerMoveBound);
         window.removeEventListener('pointerup', this.handlePointerUpBound);
+        window.removeEventListener('gesturestart', this.handleGestureStartBound);
+        window.removeEventListener('keydown', this.handleKeyDownBound);
       }
     }
   }

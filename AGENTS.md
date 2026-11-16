@@ -8,6 +8,8 @@ A V2.2 está implementada: ativações individuais alternadas (`docs/turn-system
 
 Em planejamento, ainda não implementado: três melhorias de interface, chamadas pela coordenação de "V2.2 (interface)". São a rotação horizontal de 360° da câmera com botão direito + arraste, a seleção de células livres encobertas por personagens e a orientação automática dos aliados para o inimigo vivo mais próximo depois de andar. O diagnóstico e o desenho estão em `docs/architecture.md`, e as tarefas em `docs/implementation-plan.md`. Elas não alteram `src/game/`, `src/shared/types.ts` nem `src/config/`.
 
+Em andamento: a V2.3, com sete melhorias. São o Arcane Burst com um projétil e uma explosão, o atalho `E` para encerrar o turno, a opacidade da unidade ativa, o ataque inteligente, o desfazer movimento, as posições iniciais sorteadas com semente e três mapas sorteados sem repetição consecutiva. Só os contratos em `src/shared/types.ts` já foram alterados, então `npm run typecheck` falha em `GameEngine.ts` e `main.ts` até a tarefa M0 do plano ser feita. O desenho está em `docs/architecture.md`, as regras em `docs/game-design.md` e as tarefas em `docs/implementation-plan.md`.
+
 A V3 e a V4 estão descritas em `docs/roadmap.md` só como plano. Não implemente nada delas nem prepare o código para elas sem um pedido explícito.
 
 ## Limites entre camadas
@@ -33,6 +35,19 @@ A V3 e a V4 estão descritas em `docs/roadmap.md` só como plano. Não implement
 - Nada no cenário pode pressupor a vista inicial: uma peça alta fora do tabuleiro precisa ser escondida quando fica entre a câmera e as células.
 - A orientação das unidades é só apresentação e fica no renderer (`facingY`). `syncUnits` não zera a rotação. Se uma regra passar a depender de orientação, ela vai para o motor e para o contrato.
 - Lógica de interface que não precisa de Three.js nem do DOM (órbita, resolvedor de seleção, orientação) fica em módulo próprio, sem essas importações, com teste em `tests/`.
+
+## Regras da V2.3
+
+- **Sorteio só com semente.** O motor não usa `Math.random` nas regras. Mapa e posições iniciais saem do gerador com semente de `src/game/`, e a mesma semente repete a batalha. A ordem em que o gerador é consumido (mapa, heróis, inimigos) não muda sem atualizar os testes.
+- **Teste que usa a batalha padrão fixa a semente.** Teste de regra monta o cenário com posições explícitas, que não passam pelo sorteio.
+- **Mapas ficam em `MAPS`, em `gameConfig.ts`.** Todo mapa é 12×12, não tem obstáculo nas linhas de nascimento e tem todas as células livres ligadas. Um mapa novo entra com o teste dessas restrições.
+- **Ação inteligente é atômica e fica no motor.** `smartAttack` e `smartUseSkill` andam e agem, ou não fazem nada. A interface não escolhe a célula nem calcula caminho: ela mostra a prévia a partir de `getSmartAttackPlan` e `getSmartSkillPlan`.
+- **Toda ação que anda e age em um clique tem prévia no hover**, igual ao que o clique vai executar.
+- **Desfazer é decisão do motor.** A interface habilita o botão por `canUndoMove` e não guarda posição anterior por conta própria.
+- **Os eventos de uma habilidade são contíguos e chegam no mesmo lote**: `skillUsed`, depois o `unitAttacked` ou `unitHealed` de cada atingido. O renderer agrupa esses eventos em uma animação; não transforme cada evento de habilidade em uma animação separada.
+- **Atalho de teclado chama o mesmo caminho do botão.** Não duplique as travas de vez do jogador e de animação.
+- **`reset()` pode trocar o mapa.** Quem trata `gameReset` reconstrói o tabuleiro a partir do snapshot e libera geometrias e materiais antigos.
+- **A unidade ativa vem de `activeUnitId`**, não de `selectedUnitId`, que é nulo na vez dos inimigos.
 
 ## Assets
 

@@ -7,14 +7,14 @@ import { archerAt, knightAt, meleeAt, unit } from './helpers';
 describe('CameraController: órbita 360° e suavização', () => {
   const createCamera = () => new THREE.OrthographicCamera(-10, 10, 8.75, -8.75, 0.1, 100);
 
-  it('inicializa com altura Y=18.5, raio R=hypot(17,17) e ângulo PI/4', () => {
+  it('inicializa com altura Y=12.8, raio R=20.0 e ângulo PI/4', () => {
     const cam = createCamera();
     const ctrl = new CameraController(cam);
 
     expect(ctrl.currentAzimuth).toBeCloseTo(Math.PI / 4);
     expect(ctrl.targetAzimuth).toBeCloseTo(Math.PI / 4);
-    expect(cam.position.y).toBeCloseTo(18.5);
-    expect(Math.hypot(cam.position.x, cam.position.z)).toBeCloseTo(Math.hypot(17, 17));
+    expect(cam.position.y).toBeCloseTo(12.8);
+    expect(Math.hypot(cam.position.x, cam.position.z)).toBeCloseTo(20.0);
     expect(cam.top - cam.bottom).toBeCloseTo(17.5);
   });
 
@@ -37,8 +37,8 @@ describe('CameraController: órbita 360° e suavização', () => {
 
     expect(Math.abs(ctrl.targetAzimuth - Math.PI / 4)).toBeGreaterThan(Math.PI * 2);
     expect(ctrl.currentAzimuth).toBeCloseTo(ctrl.targetAzimuth, 2);
-    expect(cam.position.y).toBeCloseTo(18.5);
-    expect(Math.hypot(cam.position.x, cam.position.z)).toBeCloseTo(Math.hypot(17, 17));
+    expect(cam.position.y).toBeCloseTo(12.8);
+    expect(Math.hypot(cam.position.x, cam.position.z)).toBeCloseTo(20.0);
     expect(cam.top - cam.bottom).toBeCloseTo(initialZoomSpan);
 
     // Verifica que a câmera continua olhando para target (0, 0.25, 0)

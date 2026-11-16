@@ -162,7 +162,7 @@ export class BoardRenderer {
     );
   }
 
-  buildBoard(gridSize: number, obstacleDefs: ObstacleDef[]): void {
+  buildBoard(gridSize: number, obstacleDefs: ObstacleDef[], mapId = 'ruins'): void {
     this.gridSize = gridSize;
 
     for (let i = this.group.children.length - 1; i >= 0; i--) {
@@ -174,21 +174,75 @@ export class BoardRenderer {
     this.tileMeshes = [];
     this.obstacleMeshes = [];
 
-    // Stone base plinth
-    const baseWidth = gridSize * CELL_SIZE + 0.6;
-    const baseHeight = 0.5;
-    const baseGeo = new THREE.BoxGeometry(baseWidth, baseHeight, baseWidth);
-    const baseMat = new THREE.MeshStandardMaterial({
-      color: 0x334155,
+    // Plinto/base de diorama em camadas estilo FFT (y < 0, fora das células jogáveis)
+    const upperWidth = gridSize * CELL_SIZE + 0.65;
+    const upperHeight = 0.38;
+    const upperMat = new THREE.MeshStandardMaterial({
+      color: mapId === 'fortress' ? 0x293548 : 0x334155,
       roughness: 0.9,
       metalness: 0.08,
     });
-    const baseMesh = new THREE.Mesh(baseGeo, baseMat);
-    baseMesh.position.set(0, -TILE_HEIGHT / 2 - baseHeight / 2, 0);
-    baseMesh.receiveShadow = true;
-    this.group.add(baseMesh);
+    const upperMesh = new THREE.Mesh(
+      new THREE.BoxGeometry(upperWidth, upperHeight, upperWidth),
+      upperMat
+    );
+    upperMesh.position.set(0, -TILE_HEIGHT / 2 - upperHeight / 2, 0);
+    upperMesh.receiveShadow = true;
+    this.group.add(upperMesh);
 
-    // 8x8 stone floor tiles
+    const midWidth = gridSize * CELL_SIZE + 1.4;
+    const midHeight = 0.48;
+    const midMat = new THREE.MeshStandardMaterial({
+      color: mapId === 'fortress' ? 0x1e293b : 0x253042,
+      roughness: 0.94,
+    });
+    const midMesh = new THREE.Mesh(
+      new THREE.BoxGeometry(midWidth, midHeight, midWidth),
+      midMat
+    );
+    midMesh.position.set(0, -TILE_HEIGHT / 2 - upperHeight - midHeight / 2, 0);
+    midMesh.receiveShadow = true;
+    this.group.add(midMesh);
+
+    const lowerWidth = gridSize * CELL_SIZE + 2.15;
+    const lowerHeight = 0.65;
+    const lowerMat = new THREE.MeshStandardMaterial({
+      color: 0x161f2e,
+      roughness: 0.96,
+    });
+    const lowerMesh = new THREE.Mesh(
+      new THREE.BoxGeometry(lowerWidth, lowerHeight, lowerWidth),
+      lowerMat
+    );
+    lowerMesh.position.set(0, -TILE_HEIGHT / 2 - upperHeight - midHeight - lowerHeight / 2, 0);
+    lowerMesh.receiveShadow = true;
+    this.group.add(lowerMesh);
+
+    // Detalhes sutis de musgo verde nos degraus da borda externa do diorama
+    const dioramaMossMat = new THREE.MeshStandardMaterial({
+      color: 0x2d5a3c,
+      roughness: 0.92,
+    });
+    const stepOffset = midWidth / 2 - 0.14;
+    const stepY = -TILE_HEIGHT / 2 - upperHeight + 0.02;
+    const mossEdgeCoords: [number, number, number, number][] = [
+      [-stepOffset * 0.65, stepOffset, 1.4, 0.28],
+      [stepOffset * 0.45, stepOffset, 1.1, 0.28],
+      [-stepOffset * 0.5, -stepOffset, 1.3, 0.28],
+      [stepOffset, -stepOffset * 0.55, 0.28, 1.4],
+      [-stepOffset, stepOffset * 0.4, 0.28, 1.2],
+    ];
+    for (const [mx, mz, mw, md] of mossEdgeCoords) {
+      const strip = new THREE.Mesh(
+        new THREE.BoxGeometry(mw, 0.07, md),
+        dioramaMossMat
+      );
+      strip.position.set(mx, stepY, mz);
+      strip.receiveShadow = true;
+      this.group.add(strip);
+    }
+
+    // Stone floor tiles
     for (let y = 0; y < gridSize; y++) {
       for (let x = 0; x < gridSize; x++) {
         const isLight = (x + y) % 2 === 0;
@@ -204,8 +258,8 @@ export class BoardRenderer {
       }
     }
 
-    // Medieval ruins perimeter around the 8x8 arena
-    this.buildRuinsPerimeter(gridSize);
+    // Perímetro decorativo conforme o mapa
+    this.buildPerimeterScenery(gridSize, mapId);
 
     // Internal obstacles by kind
     for (const obs of obstacleDefs) {
@@ -213,7 +267,7 @@ export class BoardRenderer {
     }
   }
 
-  private buildRuinsPerimeter(gridSize: number): void {
+  private buildPerimeterScenery(gridSize: number, mapId: string): void {
     const half = gridSize / 2;
     const outerRadius = half + 0.95;
     const corner = half + 0.65;
@@ -230,13 +284,127 @@ export class BoardRenderer {
     rim.receiveShadow = true;
     this.group.add(rim);
 
-    // Back-left & back-right ruined walls (kept behind board so camera view is unobstructed)
+    // 4 Corner torches / iron braziers
+    const torchCoords: [number, number][] = [
+      [-corner, -corner],
+      [corner, -corner],
+      [-corner, corner],
+      [corner, corner],
+    ];
+    const brazierMat = new THREE.MeshStandardMaterial({
+      color: mapId === 'fortress' ? 0x27272a : 0x475569,
+      roughness: 0.6,
+      metalness: mapId === 'fortress' ? 0.5 : 0.1,
+    });
+    const flameMat = new THREE.MeshBasicMaterial({ color: 0xfb923c });
+
+    for (const [tx, tz] of torchCoords) {
+      const post = new THREE.Mesh(
+        new THREE.BoxGeometry(0.42, mapId === 'fortress' ? 1.15 : 1.35, 0.42),
+        mapId === 'fortress' ? brazierMat : this.wallMat
+      );
+      post.position.set(tx, 0.45, tz);
+      post.castShadow = true;
+      post.receiveShadow = true;
+
+      const bowl = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.16, 0.25, 6), brazierMat);
+      bowl.position.set(tx, mapId === 'fortress' ? 1.12 : 1.25, tz);
+
+      const flame = new THREE.Mesh(new THREE.ConeGeometry(0.18, 0.42, 6), flameMat);
+      flame.position.set(tx, mapId === 'fortress' ? 1.42 : 1.54, tz);
+
+      this.group.add(post, bowl, flame);
+    }
+
+    if (mapId === 'fortress') {
+      // Ameias/muros fortificados na borda + estandartes escuros
+      const wallSegments: { x: number; y: number; z: number; w: number; h: number; d: number }[] = [
+        { x: -half * 0.45, y: 0.95, z: -outerRadius, w: gridSize * 0.45, h: 1.9, d: 0.55 },
+        { x: half * 0.45, y: 0.95, z: -outerRadius, w: gridSize * 0.45, h: 1.9, d: 0.55 },
+        { x: -outerRadius, y: 0.9, z: -half * 0.45, w: 0.55, h: 1.8, d: gridSize * 0.45 },
+        { x: -outerRadius, y: 0.9, z: half * 0.45, w: 0.55, h: 1.8, d: gridSize * 0.45 },
+        { x: outerRadius, y: 0.35, z: -half * 0.5, w: 0.45, h: 0.7, d: gridSize * 0.35 },
+        { x: half * 0.5, y: 0.35, z: outerRadius, w: gridSize * 0.35, h: 0.7, d: 0.45 },
+      ];
+      for (const seg of wallSegments) {
+        const mesh = new THREE.Mesh(new THREE.BoxGeometry(seg.w, seg.h, seg.d), this.wallMat);
+        mesh.position.set(seg.x, seg.y - 0.2, seg.z);
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
+        this.group.add(mesh);
+      }
+
+      // Ameias no topo das muralhas traseiras
+      for (let i = -2; i <= 2; i++) {
+        const merlonBack = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.35, 0.58), this.wallMat);
+        merlonBack.position.set(i * 2.0, 1.85, -outerRadius);
+        merlonBack.castShadow = true;
+        this.group.add(merlonBack);
+      }
+
+      // Estandartes escuros fora da grade
+      const poleMat = new THREE.MeshStandardMaterial({ color: 0x3f3f46, metalness: 0.5 });
+      const bannerBlue = new THREE.MeshStandardMaterial({ color: 0x1d4ed8, roughness: 0.85 });
+      const bannerCrimson = new THREE.MeshStandardMaterial({ color: 0x991b1b, roughness: 0.85 });
+      const bannerPositions: [number, number, THREE.MeshStandardMaterial][] = [
+        [-half * 0.65, outerRadius + 0.15, bannerBlue],
+        [half * 0.65, -outerRadius - 0.15, bannerCrimson],
+      ];
+      for (const [bx, bz, clothMat] of bannerPositions) {
+        const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 1.9, 6), poleMat);
+        pole.position.set(bx, 0.85, bz);
+        const cloth = new THREE.Mesh(new THREE.BoxGeometry(0.48, 1.15, 0.05), clothMat);
+        cloth.position.set(bx, 1.15, bz);
+        cloth.castShadow = true;
+        this.group.add(pole, cloth);
+      }
+      return;
+    }
+
+    if (mapId === 'courtyard') {
+      // Arcos quebrados + vegetação discreta de pátio
+      const archPosts: [number, number, number][] = [
+        [-half * 0.55, -outerRadius, 1.6],
+        [-half * 0.25, -outerRadius, 1.3],
+        [-outerRadius, -half * 0.5, 1.5],
+        [outerRadius, -half * 0.55, 0.7],
+      ];
+      for (const [ax, az, h] of archPosts) {
+        const post = new THREE.Mesh(new THREE.BoxGeometry(0.55, h, 0.55), this.wallMat);
+        post.position.set(ax, h / 2 - 0.15, az);
+        post.castShadow = true;
+        post.receiveShadow = true;
+        this.group.add(post);
+      }
+      const lintel = new THREE.Mesh(new THREE.BoxGeometry(half * 0.35 + 0.6, 0.35, 0.55), this.wallMat);
+      lintel.position.set(-half * 0.4, 1.5, -outerRadius);
+      lintel.castShadow = true;
+      this.group.add(lintel);
+
+      const mossMat = new THREE.MeshStandardMaterial({ color: 0x2d5a3c, roughness: 0.9 });
+      const tufts: [number, number][] = [
+        [-mossEdge, -half * 0.7],
+        [-mossEdge, half * 0.35],
+        [-half * 0.2, -mossEdge - 0.12],
+        [half * 0.55, -mossEdge - 0.12],
+        [mossEdge + 0.12, -half * 0.2],
+        [half * 0.4, mossEdge + 0.12],
+      ];
+      for (const [mx, mz] of tufts) {
+        const tuft = new THREE.Mesh(new THREE.DodecahedronGeometry(0.24, 0), mossMat);
+        tuft.scale.set(1.35, 0.7, 1.25);
+        tuft.position.set(mx, 0.05, mz);
+        this.group.add(tuft);
+      }
+      return;
+    }
+
+    // 'ruins' (padrão): muros quebrados, arco de pedra na borda e tufos de musgo
     const backWallSegments: { x: number; y: number; z: number; w: number; h: number; d: number }[] = [
       { x: -half * 0.55, y: 0.9, z: -outerRadius, w: gridSize * 0.4, h: 1.8, d: 0.5 },
       { x: half * 0.45, y: 0.65, z: -outerRadius, w: gridSize * 0.35, h: 1.3, d: 0.5 },
       { x: -outerRadius, y: 0.85, z: -half * 0.5, w: 0.5, h: 1.7, d: gridSize * 0.42 },
       { x: -outerRadius, y: 0.5, z: half * 0.52, w: 0.5, h: 1.0, d: gridSize * 0.3 },
-      // Low broken front/right ruins for framing without blocking tiles
       { x: outerRadius, y: 0.35, z: -half * 0.6, w: 0.45, h: 0.7, d: gridSize * 0.28 },
       { x: half * 0.65, y: 0.3, z: outerRadius, w: gridSize * 0.25, h: 0.6, d: 0.45 },
     ];
@@ -249,32 +417,12 @@ export class BoardRenderer {
       this.group.add(mesh);
     }
 
-    // 4 Corner torches with stone braziers and emissive flames
-    const torchCoords: [number, number][] = [
-      [-corner, -corner],
-      [corner, -corner],
-      [-corner, corner],
-      [corner, corner],
-    ];
-    const brazierMat = new THREE.MeshStandardMaterial({ color: 0x475569, roughness: 0.8 });
-    const flameMat = new THREE.MeshBasicMaterial({ color: 0xfb923c });
+    // Arco de pedra na borda traseira
+    const archLintel = new THREE.Mesh(new THREE.BoxGeometry(2.1, 0.32, 0.52), this.wallMat);
+    archLintel.position.set(0, 1.65, -outerRadius);
+    archLintel.castShadow = true;
+    this.group.add(archLintel);
 
-    for (const [tx, tz] of torchCoords) {
-      const post = new THREE.Mesh(new THREE.BoxGeometry(0.42, 1.35, 0.42), this.wallMat);
-      post.position.set(tx, 0.45, tz);
-      post.castShadow = true;
-      post.receiveShadow = true;
-
-      const bowl = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.16, 0.25, 6), brazierMat);
-      bowl.position.set(tx, 1.25, tz);
-
-      const flame = new THREE.Mesh(new THREE.ConeGeometry(0.18, 0.42, 6), flameMat);
-      flame.position.set(tx, 1.54, tz);
-
-      this.group.add(post, bowl, flame);
-    }
-
-    // Discrete mossy/foliage tufts along ruins
     const mossMat = new THREE.MeshStandardMaterial({ color: 0x2d5a3c, roughness: 0.9 });
     const mossSpots: [number, number][] = [
       [-mossEdge, -half * 0.75],

@@ -254,3 +254,199 @@ Testes em Node não validam o que aparece na tela. Só o roteiro acima fecha os 
 - **Orientação e fila de animação.** O giro ao fim do movimento usa o snapshot mais recente. Uma ação enfileirada logo depois pode sobrescrever a orientação no meio do giro; a animação de ataque deve partir da orientação já gravada.
 - **Entrada sem botão direito.** Trackpads e telas de toque não têm o gesto. Fica fora desta entrega, mas a rotação não deve ser o único jeito de alcançar uma célula: o objetivo 2 cobre o caso comum sem girar.
 - **Gestos do navegador.** Algumas extensões e navegadores usam o arraste com o botão direito. O `preventDefault` no `contextmenu` e a captura do ponteiro reduzem o problema, mas ele precisa ser conferido no QA.
+
+# Plano de implementação — V2.3
+
+## Estado e limites
+
+Plano proposto. Só os contratos em `src/shared/types.ts` foram alterados; o resto está por fazer. O diagnóstico e o desenho de cada melhoria estão em `architecture.md`, na seção "V2.3", e as regras em `game-design.md`.
+
+Enquanto o motor não implementar os contratos novos, `npm run typecheck` falha em `GameEngine.ts` e em `main.ts`. A tarefa M0 abaixo existe para tirar o projeto desse estado logo no início.
+
+As sete melhorias: (1) Arcane Burst com um projétil e uma explosão, (2) atalho `E`, (3) opacidade da unidade ativa, (4) ataque inteligente, (5) desfazer movimento, (6) posições iniciais sorteadas com semente, (7) três mapas sorteados sem repetição consecutiva.
+
+## Responsáveis
+
+Proposta para a coordenação confirmar, com os mesmos papéis das entregas anteriores.
+
+| Agente | Responsabilidade na V2.3 |
+|---|---|
+| t18 — Engine + Testes | Config, motor e testes das melhorias 4 a 7; testes em Node dos módulos puros da interface |
+| t1b — Rendering + UI + QA | Melhorias 1 a 3; a parte de interface das melhorias 4, 5 e 7; QA no navegador |
+| t16 — Codex | Revisão dos contratos, do determinismo e dos limites de camada |
+| t19 — Arquitetura | Contratos e desenho (esta entrega); dúvidas de desenho durante a implementação |
+| t1c — Docs | Reconcilia os documentos com o que for entregue |
+
+`src/shared/types.ts` e `src/config/gameConfig.ts` têm um único editor (t18). `src/main.ts`, `InputManager.ts`, `HudManager.ts` e `UnitRenderer.ts` têm um único editor (t1b).
+
+## Ordem e dependências
+
+```
+M0 ──> M1 ──> M2 ──────────────> I4 (mapas na interface)
+  ├──> M3 ─────────────────────> I5 (desfazer na interface)
+  └──> M4 ─────────────────────> I6 (ataque inteligente na interface)
+
+I1 (Arcane Burst)   I2 (atalho E)   I3 (opacidade)      independentes do motor
+
+                    todas ──> R1 (revisão) ──> R2 (QA e docs)
+```
+
+- M0 vem primeiro e é curta: devolve o `typecheck` ao verde.
+- I1, I2 e I3 não dependem do motor e podem começar já.
+- I3, I5 e I1 mexem em `UnitRenderer.ts`; I4, I5 e I6 mexem em `main.ts`. São do mesmo editor e feitas em sequência.
+
+## Tarefas do motor (t18)
+
+**M0. Contratos com implementação mínima**
+
+- [ ] `GameEngine` passa a ter os métodos e campos novos, ainda sem a lógica final: `mapId`, `mapName`, `seed` e `canUndoMove` no snapshot; `undoMove`, `smartAttack`, `smartUseSkill` e as consultas de plano recusando ou devolvendo `null`.
+
+Aceite: `npm run typecheck` e `npm test` passam, sem mudança de comportamento.
+
+**M1. Gerador com semente e posições sorteadas** (melhoria 6). Depende de M0.
+
+- [ ] Módulo do gerador em `src/game/`, sem dependência externa.
+- [ ] Lista de unidades sem posição na config; linhas de nascimento por mapa.
+- [ ] Sorteio na ordem definida em `architecture.md`.
+- [ ] Cenário com posições explícitas continua sem sorteio.
+
+Aceite:
+
+- a mesma semente produz o mesmo estado inicial, duas vezes seguidas;
+- sementes diferentes produzem posições diferentes em pelo menos uma de várias tentativas;
+- todo herói nasce nas linhas do sul e todo inimigo nas do norte;
+- nenhuma unidade nasce em obstáculo nem na célula de outra, verificado em muitas sementes;
+- os testes atuais do motor passam sem alteração de expectativa.
+
+**M2. Três mapas e sorteio sem repetição** (melhoria 7). Depende de M1.
+
+- [ ] `MAPS` na config, com os traçados de `game-design.md`.
+- [ ] Sorteio do mapa na criação do motor e em cada `reset()`, excluindo o anterior.
+- [ ] `mapId` e `mapName` no snapshot.
+
+Aceite:
+
+- cada mapa passa nas restrições: 12×12, linhas de nascimento sem obstáculo, células livres todas ligadas, sem obstáculo duplicado;
+- em uma sequência longa de reinícios, nenhum mapa aparece duas vezes seguidas e os três aparecem;
+- com semente fixa, a sequência de mapas se repete;
+- o snapshot depois do `reset()` traz os obstáculos do mapa novo.
+
+**M3. Desfazer movimento** (melhoria 5). Depende de M0.
+
+- [ ] Registro do último movimento manual; `undoMove()`; `canUndoMove`; evento `moveUndone`.
+
+Aceite, um teste para cada caso:
+
+- mover e desfazer devolve a posição e `hasMoved = false`, e o evento traz o caminho de volta;
+- depois de desfazer, a unidade se move de novo e um segundo desfazer é recusado;
+- recusado sem movimento feito, depois de atacar, depois de usar habilidade, na vez inimiga e depois do fim da batalha;
+- recusado depois de `smartAttack` com deslocamento;
+- `canUndoMove` acompanha cada um desses casos;
+- desfazer não encerra a ativação nem consome o ataque;
+- o registro não vaza para a ativação seguinte nem sobrevive ao `reset()`.
+
+**M4. Ataque e habilidade inteligentes** (melhoria 4). Depende de M0.
+
+- [ ] Validação de alvo de habilidade aceitando a posição do lançador como parâmetro.
+- [ ] `getSmartAttackPlan`, `smartAttack`, `getSmartSkillPlan`, `smartUseSkill`.
+
+Aceite, um teste para cada caso:
+
+- alvo já ao alcance: ataca sem andar e `hasMoved` continua `false`;
+- alvo fora de alcance: anda para a célula de menor custo e ataca; a ativação termina sozinha;
+- desempate por distância ao alvo e depois por `(y, x)`, com cenários montados para cada nível;
+- arqueira sem linha de visão anda para uma célula com visão, e não para a mais próxima sem visão;
+- nenhuma célula válida ao alcance do movimento: recusado, sem evento e sem mudança de estado;
+- unidade que já se moveu e alvo fora de alcance: recusado;
+- golpe final com deslocamento: vitória, sem turno inimigo;
+- o plano devolvido pela consulta é exatamente o caminho que a ação executa;
+- `smartUseSkill` com habilidade de um alvo, em área e de cura, inclusive cura no próprio lançador sem andar;
+- as consultas de plano não alteram o estado nem emitem eventos.
+
+## Tarefas da interface (t1b)
+
+**I1. Arcane Burst** (melhoria 1)
+
+- [ ] Módulo puro de agrupamento de eventos de habilidade, com testes em Node (t18).
+- [ ] Animação composta em `UnitRenderer`: projétil até a célula alvo, efeito no impacto, dano simultâneo.
+
+Aceite: com três inimigos na área, sai um único projétil do mago até o centro; a explosão começa no impacto; as três barras de HP caem juntas; as mortes tocam depois; Runic Strike não muda; Marked Shot mostra a flecha antes da mira.
+
+**I2. Atalho `E`** (melhoria 2)
+
+- [ ] Ouvinte de teclado em `HudManager` chamando o mesmo caminho do botão; rótulo "Encerrar turno (E)".
+
+Aceite: `E` encerra a ativação quando o botão está habilitado; não faz nada na vez inimiga, durante animação nem com a tela de resultado aberta; segurar a tecla não encerra várias ativações; `Ctrl+E` é ignorado.
+
+**I3. Opacidade** (melhoria 3)
+
+- [ ] `syncUnits` recebe `activeUnitId`; materiais do corpo por unidade; constante com os dois valores.
+
+Aceite: a unidade ativa fica em 1,0 e as outras vivas em 0,75, nos dois times; a troca acompanha cada mudança de ativação, inclusive entre inimigos seguidos; com a batalha encerrada, todas as vivas voltam a 1,0; cadáveres e barras de HP não mudam; o reinício restaura tudo.
+
+**I4. Mapas na interface** (melhoria 7). Depende de M2.
+
+- [ ] Reconstruir o tabuleiro ao receber `gameReset`, liberando geometrias e materiais antigos.
+- [ ] Mostrar `mapName` no HUD.
+
+Aceite: depois de reiniciar, os obstáculos na tela são os do snapshot; a seleção por clique respeita os obstáculos novos; a memória de GPU não cresce em reinícios repetidos; a câmera mantém o ângulo.
+
+**I5. Desfazer na interface** (melhoria 5). Depende de M3.
+
+- [ ] Botão "Desfazer movimento" ligado a `canUndoMove`; animação de `moveUndone`.
+
+Aceite: o botão só fica habilitado quando o motor aceita o desfazer e não há animação; a unidade volta andando pelo caminho; os destaques são recalculados para a posição de origem.
+
+**I6. Ataque inteligente na interface** (melhoria 4). Depende de M4.
+
+- [ ] Clique em inimigo chama `smartAttack`; clique em célula no modo de habilidade chama `smartUseSkill`.
+- [ ] Prévia no hover com o caminho e a célula de destino vindos das consultas de plano.
+- [ ] Destaque distinto para inimigo atacável só depois de andar.
+
+Aceite: a prévia mostrada no hover é o caminho que a unidade faz ao clicar; atacar um inimigo ao alcance não gasta o movimento; nenhum cálculo de alcance ou caminho foi adicionado fora do motor.
+
+## Integração
+
+**R1. Revisão** — t16
+
+- [ ] Nenhum `Math.random` nas regras; todo sorteio pelo gerador com semente.
+- [ ] Ações inteligentes atômicas; recusas sem evento e sem mudança de estado.
+- [ ] Nenhuma regra nova em rendering, input ou ui.
+- [ ] Contratos e comentários de `types.ts` coerentes com a implementação.
+
+**R2. QA no navegador e documentação** — t1b e t1c
+
+- [ ] Roteiro abaixo, com evidência de cada item.
+- [ ] Documentos passam a descrever o que foi entregue.
+
+## Verificação
+
+1. **Testes em Node:** motor (M1 a M4) e módulo de agrupamento de eventos (I1).
+2. **Regressão:** `npm run typecheck`, `npm test` e `npm run build`.
+3. **Partidas simuladas com semente:** um jogador automático usando `smartAttack` joga várias sementes; toda partida termina em vitória ou derrota, nos três mapas.
+4. **Roteiro de QA no navegador:**
+   - Arcane Burst com um, dois e três inimigos na área, e com morte;
+   - `E` em cada estado de turno;
+   - opacidade ao longo de uma rodada inteira e depois do fim da batalha;
+   - ataque inteligente corpo a corpo e à distância, com a prévia conferida contra o resultado;
+   - desfazer em cada caso permitido e em cada caso recusado;
+   - dez reinícios seguidos: mapa sempre diferente do anterior, posições dentro das linhas de nascimento, tabuleiro e obstáculos corretos.
+
+## Decisões para a coordenação
+
+- **Itens além do pedido no contrato:** `seed` no snapshot, `SmartActionPlan` e as duas consultas de plano. Sem as consultas, a prévia do ataque inteligente não pode ser feita sem regra na interface.
+- **`smartUseSkill` entra ou não.** O contrato o inclui. Ele é mais útil para Runic Strike e Healing Light; para o Arcane Burst a prévia por célula é mais difícil de ler. Dá para entregar só o ataque inteligente e manter `useSkill`.
+- **Ataque inteligente no modo padrão.** Um clique passa a poder andar e atacar sem volta. A alternativa é valer só no modo de ataque.
+- **Repetição de mapa entre recarregamentos da página.** O motor só garante dentro da mesma sessão. Guardar o último mapa no navegador é opcional.
+- **Atalho para desfazer.** O pedido não define tecla. Sugestão: `Z`.
+
+## Riscos
+
+- **`typecheck` quebrado até M0.** Qualquer agente que rode a verificação antes disso vê erros que não são dele.
+- **Clique que anda e ataca sem volta.** Sem a prévia, o ataque inteligente leva a unidade para onde o jogador não esperava, e o movimento não pode ser desfeito.
+- **Equilíbrio com posições sorteadas.** O mago ou o clérigo podem nascer na frente e a arqueira sem linha de tiro. A simulação com várias sementes mede se a batalha continua vencível; o ajuste, se preciso, é restringir colunas por classe.
+- **Mapas que travam a IA.** Passagens estreitas com dez unidades podem deixar inimigos sem caminho. A simulação nos três mapas cobre isso.
+- **Opacidade.** Materiais translúcidos mudam a ordenação de desenho e deixam ver o interior dos modelos; só o navegador mostra se o resultado é aceitável.
+- **Vazamento ao reconstruir o tabuleiro.** `buildBoard` hoje remove as malhas sem liberar geometrias e materiais.
+- **Testes que dependem das posições padrão.** Os que usam a batalha padrão sem cenário explícito passam a depender da semente e precisam fixá-la.
+- **Eventos de habilidade fora de ordem.** O agrupamento da animação supõe que os eventos de uma habilidade chegam juntos e contíguos. Se o motor mudar isso, a animação quebra em silêncio; por isso a garantia entra no contrato e em um teste.

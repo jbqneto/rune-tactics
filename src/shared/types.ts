@@ -33,6 +33,26 @@ export interface ObstacleDef {
 }
 
 /**
+ * Um campo de batalha. Os mapas ficam em `src/config/gameConfig.ts`; o motor sorteia um a cada batalha,
+ * sem repetir o da batalha anterior.
+ */
+export interface MapConfig {
+  /** Identificador estável, em kebab-case. */
+  id: string;
+  /** Nome exibido no HUD. */
+  name: string;
+  gridSize: number;
+  obstacles: ObstacleDef[];
+  /**
+   * Linhas (`y`) onde os heróis nascem. Cada herói recebe uma célula livre sorteada nessas linhas.
+   * Elas precisam ter mais células sem obstáculo do que o número de heróis.
+   */
+  playerSpawnRows: number[];
+  /** O mesmo para os inimigos. */
+  enemySpawnRows: number[];
+}
+
+/**
  * De quem é a vez, em resumo. É derivado de `TurnState`:
  * 'player' cobre `awaiting_player_choice` e `player_unit_active`; 'enemy' é `enemy_activation`.
  */
@@ -82,6 +102,11 @@ export type GameEvent =
   /** `path` inclui a célula de origem e a de destino. */
   | { type: 'unitMoved'; unitId: string; path: GridCoord[] }
   /**
+   * O movimento da ativação foi desfeito. `path` é o caminho de volta: começa na célula que a unidade
+   * ocupava e termina na célula de onde ela tinha saído, as duas incluídas.
+   */
+  | { type: 'moveUndone'; unitId: string; path: GridCoord[] }
+  /**
    * Dano aplicado a um alvo. `isRanged` indica projétil (alcance acima de 1).
    * `skillId` vem preenchido quando o dano é de uma habilidade; nesse caso há um `skillUsed` logo antes.
    */
@@ -110,8 +135,22 @@ export type GameEvent =
   | { type: 'battleEnded'; winner: Team }
   | { type: 'gameReset' };
 
+/**
+ * O que `smartAttack` ou `smartUseSkill` faria agora, para a interface mostrar antes do clique.
+ * `path` tem só a célula atual quando a ação vale de onde a unidade está; senão vai da célula atual
+ * até a célula de onde ela vai agir, as duas incluídas.
+ */
+export interface SmartActionPlan {
+  path: GridCoord[];
+}
+
 /** Cópia do estado: alterá-la não afeta o motor. */
 export interface GameStateSnapshot {
+  /** Mapa sorteado para esta batalha. */
+  mapId: string;
+  mapName: string;
+  /** Semente que gerou o mapa e as posições iniciais desta batalha. A mesma semente repete a batalha. */
+  seed: number;
   gridSize: number;
   /** Só as posições de `obstacleDefs`, na mesma ordem. */
   obstacles: GridCoord[];
@@ -137,6 +176,8 @@ export interface GameStateSnapshot {
   activationTeam: Team | null;
   /** Unidade em foco no HUD. Em `player_unit_active` é sempre igual a `activeUnitId`. */
   selectedUnitId: string | null;
+  /** `undoMove` seria aceito agora. Ver as condições no método. */
+  canUndoMove: boolean;
   winner: Team | null;
 }
 
@@ -223,6 +264,45 @@ export interface IGameEngine {
   useSkill(targetCell: GridCoord): ActionResult;
 
   /**
+   * Desfaz o movimento da unidade ativa: ela volta à célula de onde saiu e `hasMoved` volta a `false`,
+   * então pode se mover de novo. Emite `moveUndone`. Não encerra a ativação.
+   * Só é aceito quando todas as condições valem (é o que `canUndoMove` informa):
+   * - é a vez do jogador e a unidade ativa já se moveu nesta ativação;
+   * - ela não atacou nem usou habilidade depois de se mover;
+   * - o movimento não foi parte de `smartAttack` ou `smartUseSkill`;
+   * - `undoMove` ainda não foi usado nesta ativação. Depois de desfazer, o novo movimento é definitivo.
+   */
+  undoMove(): ActionResult;
+
+  /**
+   * Plano de `smartAttack` para esse alvo, ou `null` se o ataque não é possível nesta ativação.
+   * Consulta pura: não altera o estado nem emite eventos.
+   */
+  getSmartAttackPlan(targetId: string): SmartActionPlan | null;
+
+  /**
+   * Ataque básico que anda sozinho se for preciso.
+   * - Se o alvo já está ao alcance, com linha de visão quando exigida, ataca de onde está, sem gastar o movimento.
+   * - Senão, se a unidade ainda não se moveu, escolhe entre as células alcançáveis de onde o ataque vale
+   *   a de menor custo de movimento; no empate, a mais próxima do alvo (Manhattan); persistindo, a de menor
+   *   `y` e depois menor `x`. Anda até ela e ataca. Emite `unitMoved` e depois `unitAttacked`.
+   * - Se não há célula assim, ou a unidade já se moveu e o alvo está fora de alcance, é recusado sem mudar nada.
+   * As duas ações acontecem juntas ou nenhuma acontece. O movimento feito aqui não pode ser desfeito.
+   * Com movimento e ataque gastos, a ativação termina sozinha, como em `moveSelectedUnit`.
+   */
+  smartAttack(targetId: string): ActionResult;
+
+  /** Plano de `smartUseSkill` para essa célula alvo, ou `null` se a habilidade não pode atingi-la nesta ativação. */
+  getSmartSkillPlan(targetCell: GridCoord): SmartActionPlan | null;
+
+  /**
+   * `useSkill` que anda sozinho se for preciso, com as mesmas regras de `smartAttack`:
+   * lança de onde está se `targetCell` já é alvo válido; senão anda até a célula alcançável de menor custo
+   * de onde ela passa a ser válida (mesmos desempates, medindo a distância até `targetCell`) e lança.
+   */
+  smartUseSkill(targetCell: GridCoord): ActionResult;
+
+  /**
    * Encerra a ativação atual do jogador e passa a vez adiante. O nome é o da versão anterior:
    * não encerra mais o turno do time inteiro.
    * - Em `player_unit_active`: encerra a ativação da unidade ativa, mesmo com ações sobrando.
@@ -240,7 +320,10 @@ export interface IGameEngine {
    */
   executeNextEnemyAction(): boolean;
 
-  /** Volta ao estado inicial e emite `gameReset`. */
+  /**
+   * Começa uma nova batalha e emite `gameReset`: sorteia um mapa diferente do anterior e novas posições
+   * iniciais. A interface precisa reconstruir o tabuleiro, porque `gridSize` e os obstáculos podem ter mudado.
+   */
   reset(): void;
 
   /** Devolve os eventos acumulados desde a última chamada e esvazia a fila. */

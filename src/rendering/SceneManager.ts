@@ -8,7 +8,7 @@ export class SceneManager {
   readonly cameraController: CameraController;
 
   private readonly canvas: HTMLCanvasElement;
-  private readonly frustumSize = 17.5;
+  private readonly frustumSize = 14.8;
   private readonly torchLights: { light: THREE.PointLight; baseIntensity: number; phase: number }[] = [];
   private rafId: number | null = null;
   private lastTime = 0;
@@ -20,8 +20,8 @@ export class SceneManager {
     this.canvas = canvas;
 
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(0x0f172a);
-    this.scene.fog = new THREE.FogExp2(0x0f172a, 0.015);
+    this.scene.background = new THREE.Color(0x0c1424);
+    this.scene.fog = new THREE.FogExp2(0x0c1424, 0.012);
 
     const aspect = this.getAspect();
     this.camera = new THREE.OrthographicCamera(
@@ -32,8 +32,8 @@ export class SceneManager {
       0.1,
       100
     );
-    this.camera.position.set(17, 18.5, 17);
-    this.camera.lookAt(0, 0.25, 0);
+    this.camera.position.set(Math.SQRT1_2 * 20.0, 12.8, Math.SQRT1_2 * 20.0);
+    this.camera.lookAt(0, 0.35, 0);
     this.cameraController = new CameraController(this.camera, this.canvas);
 
     this.renderer = new THREE.WebGLRenderer({
@@ -53,16 +53,17 @@ export class SceneManager {
   }
 
   private setupLights(): void {
-    // Cool ambient & hemisphere fill
-    const ambient = new THREE.AmbientLight(0x9fb4d4, 0.58);
+    // Soft ambient fill
+    const ambient = new THREE.AmbientLight(0x94a3b8, 0.48);
     this.scene.add(ambient);
 
-    const hemi = new THREE.HemisphereLight(0x94a3b8, 0x1e293b, 0.45);
+    // Blue-teal hemisphere sky/ground fill for FFT-style diorama contrast
+    const hemi = new THREE.HemisphereLight(0x8ec5e8, 0x1e3536, 0.62);
     this.scene.add(hemi);
 
-    // Main directional key light with shadows
-    const dirLight = new THREE.DirectionalLight(0xeef4ff, 1.15);
-    dirLight.position.set(9, 17, 7);
+    // Crisp warm directional key light with shadows
+    const dirLight = new THREE.DirectionalLight(0xfff1d6, 1.38);
+    dirLight.position.set(11, 18, 8);
     dirLight.castShadow = true;
     dirLight.shadow.mapSize.width = 2048;
     dirLight.shadow.mapSize.height = 2048;

@@ -7,6 +7,10 @@ Na V2.2, quatro heróis (guerreiro, arqueira, mago e clérigo) enfrentam seis in
 ## Como jogar
 
 - Botão direito + arrastar: girar a câmera 360° ao redor da arena.
+- **Encerrar turno (E)**: clique no botão ou pressione `E` para finalizar a ativação atual.
+- **Desfazer movimento**: use o botão para desfazer o deslocamento da unidade.
+- **Ataque com deslocamento automático**: ao escolher um alvo, a unidade se desloca automaticamente para atacá-lo quando houver um caminho válido dentro do movimento disponível.
+- **Mapas**: a cada partida, um dos 3 mapas é sorteado.
 - Em `awaiting_player_choice`, clique em qualquer herói vivo elegível para selecioná-lo.
 - Ao executar a primeira ação (mover, atacar ou usar habilidade), o herói fica travado até gastar movimento e ataque (em qualquer ordem) ou até você clicar em **Encerrar Turno** para finalizar a ativação dele.
 - Ao fim de cada ativação, a vez alterna para um inimigo elegível (ou para o próximo aliado se o outro time já esgotou suas ativações na rodada). Quando todas as unidades vivas ativarem, inicia-se uma nova rodada.

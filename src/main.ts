@@ -5,7 +5,7 @@ import { InputManager, type InteractionMode } from './input/InputManager';
 import { BoardRenderer } from './rendering/BoardRenderer';
 import { SceneManager } from './rendering/SceneManager';
 import { UnitRenderer } from './rendering/UnitRenderer';
-import type { GameEvent, GridCoord, IGameEngine, Phase } from './shared/types';
+import type { GameEvent, GameStateSnapshot, GridCoord, IGameEngine, Phase, TurnState } from './shared/types';
 import { HudManager } from './ui/HudManager';
 
 const canvas = document.getElementById('game-canvas') as HTMLCanvasElement | null;
@@ -19,6 +19,8 @@ const engine: IGameEngine = new GameEngine();
 const sceneManager = new SceneManager(canvas);
 const boardRenderer = new BoardRenderer(sceneManager.scene);
 
+const TURN_TIMER_SECONDS = 60;
+
 let mode: InteractionMode = 'default';
 let hoverCell: GridCoord | null = null;
 let hoverPath: GridCoord[] | null = null;
@@ -26,6 +28,21 @@ let hoverSkillArea: GridCoord[] = [];
 let enemyStepTimer = 0;
 let wasAnimating = false;
 let lastPhase: Phase = engine.getState().phase;
+let turnTimerSeconds = TURN_TIMER_SECONDS;
+let lastTimerActiveId: string | null = null;
+let lastTimerRound = 0;
+let lastTimerTurnState: TurnState | null = null;
+
+function handleEndTurn(): void {
+  if (unitRenderer.isAnimating || engine.getState().turnState !== 'player_unit_active') return;
+  const res = engine.endPlayerTurn();
+  if (res.ok) {
+    mode = 'default';
+    clearHover();
+    enemyStepTimer = 0.25;
+    syncFromEngine();
+  }
+}
 
 const hudManager = new HudManager(hudEl, {
   onSelectUnit: (_unitId) => {
@@ -42,23 +59,52 @@ const hudManager = new HudManager(hudEl, {
       : false;
     hudManager.update(state, mode, unitRenderer.isAnimating, hasSkillTargets);
   },
-  onEndTurn: () => {
-    if (unitRenderer.isAnimating) return;
-    const res = engine.endPlayerTurn();
+  onUndoMove: () => {
+    if (unitRenderer.isAnimating || engine.getState().turnState !== 'player_unit_active') return;
+    const res = engine.undoMove();
     if (res.ok) {
       mode = 'default';
       clearHover();
-      enemyStepTimer = 0.25;
       syncFromEngine();
     }
   },
+  onEndTurn: handleEndTurn,
   onReset: () => {
     engine.reset();
+    const newState = engine.getState();
+    boardRenderer.buildBoard(newState.gridSize, newState.obstacleDefs);
     mode = 'default';
     clearHover();
     enemyStepTimer = 0;
+    turnTimerSeconds = TURN_TIMER_SECONDS;
+    lastTimerActiveId = null;
+    lastTimerRound = 0;
+    lastTimerTurnState = null;
     syncFromEngine();
   },
+});
+
+window.addEventListener(
+  'wheel',
+  (e) => {
+    if (e.ctrlKey || e.metaKey) {
+      e.preventDefault();
+    }
+  },
+  { passive: false }
+);
+
+window.addEventListener('keydown', (e) => {
+  if ((e.ctrlKey || e.metaKey) && (e.key === '+' || e.key === '-' || e.key === '=' || e.key === '0')) {
+    e.preventDefault();
+    return;
+  }
+  if (e.repeat) return;
+  const tag = (e.target as HTMLElement | null)?.tagName;
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+  if (e.key === 'e' || e.key === 'E') {
+    handleEndTurn();
+  }
 });
 
 const unitRenderer = new UnitRenderer(
@@ -150,6 +196,23 @@ function emitCombatFeedback(events: GameEvent[]): void {
   }
 }
 
+function updateTurnTimerState(state: GameStateSnapshot): void {
+  if (state.turnState === 'player_unit_active') {
+    const unitChanged = state.activeUnitId !== lastTimerActiveId;
+    const roundChanged = state.round !== lastTimerRound;
+    const resumedPlayer = lastTimerTurnState !== 'player_unit_active';
+    if (unitChanged || roundChanged || resumedPlayer) {
+      turnTimerSeconds = TURN_TIMER_SECONDS;
+      lastTimerActiveId = state.activeUnitId;
+      lastTimerRound = state.round;
+    }
+    hudManager.updateTurnTimer(Math.ceil(turnTimerSeconds));
+  } else {
+    hudManager.updateTurnTimer(null);
+  }
+  lastTimerTurnState = state.turnState;
+}
+
 function syncFromEngine(): void {
   const events = engine.consumeEvents();
   if (events.length > 0) {
@@ -164,13 +227,14 @@ function syncFromEngine(): void {
   }
   lastPhase = state.phase;
 
-  unitRenderer.syncUnits(state.units, state.selectedUnitId, state.turnOrder);
+  unitRenderer.syncUnits(state.units, state.selectedUnitId, state.turnOrder, state.activeUnitId);
   refreshHighlights();
 
   const hasSkillTargets = state.selectedUnitId
     ? engine.getSkillTargetCells().length > 0
     : false;
   hudManager.update(state, mode, unitRenderer.isAnimating, hasSkillTargets);
+  updateTurnTimerState(state);
 }
 
 new InputManager(
@@ -193,6 +257,9 @@ new InputManager(
     onActionExecuted: () => {
       clearHover();
       syncFromEngine();
+    },
+    onFeedback: (message) => {
+      hudManager.showFeedback(message);
     },
   },
   sceneManager.cameraController
@@ -218,7 +285,19 @@ sceneManager.start((dt) => {
   wasAnimating = animatingNow;
 
   const state = engine.getState();
-  if (state.turnState === 'enemy_activation' && !animatingNow) {
+  if (state.turnState === 'player_unit_active') {
+    turnTimerSeconds = Math.max(0, turnTimerSeconds - dt);
+    hudManager.updateTurnTimer(Math.ceil(turnTimerSeconds));
+    if (turnTimerSeconds <= 0 && !animatingNow) {
+      const res = engine.endPlayerTurn();
+      if (res.ok) {
+        mode = 'default';
+        clearHover();
+        syncFromEngine();
+      }
+      return;
+    }
+  } else if (state.turnState === 'enemy_activation' && !animatingNow) {
     enemyStepTimer -= dt;
     if (enemyStepTimer <= 0) {
       const executed = engine.executeNextEnemyAction();

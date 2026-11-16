@@ -1,7 +1,17 @@
 import * as THREE from 'three';
 import type { GameEvent, GridCoord, SkillId, UnitState, UnitType } from '../shared/types';
 import type { BoardRenderer } from './BoardRenderer';
+import { CharacterVisualController } from './CharacterVisualController';
 import { computeWorldYaw, findNearestLivingEnemy, shortestAngleDelta } from './orientation';
+
+const ACTIVE_UNIT_OPACITY = 1.0;
+const INACTIVE_UNIT_OPACITY = 0.75;
+
+interface SkillHitTarget {
+  targetId: string;
+  targetHpRemaining: number;
+  hpApplied: boolean;
+}
 
 interface UnitVisual {
   id: string;
@@ -9,11 +19,14 @@ interface UnitVisual {
   team: 'player' | 'enemy';
   root: THREE.Group;
   bodyGroup: THREE.Group;
+  proceduralGroup: THREE.Group;
+  controller: CharacterVisualController;
   weaponPivot: THREE.Group;
   weaponRestRotX: number;
   baseRing: THREE.Mesh;
   hitbox: THREE.Mesh;
   flashMaterials: THREE.MeshStandardMaterial[];
+  unitMaterials: THREE.MeshStandardMaterial[];
   hpBarEl: HTMLDivElement;
   hpFillEl: HTMLDivElement;
   hpTextEl: HTMLSpanElement;
@@ -22,6 +35,8 @@ interface UnitVisual {
   maxHp: number;
   facingYaw: number;
   targetYaw: number;
+  lastOpacity: number;
+  deathClipPlayed: boolean;
 }
 
 type ActiveAnimation =
@@ -63,7 +78,9 @@ type ActiveAnimation =
       skillId: SkillId;
       origin: THREE.Vector3;
       targetPos: THREE.Vector3;
+      projectile: THREE.Mesh | null;
       vfxGroup: THREE.Group | null;
+      hits: SkillHitTarget[];
       elapsed: number;
       duration: number;
     }
@@ -93,6 +110,7 @@ export class UnitRenderer {
   private latestUnits: UnitState[] = [];
   private latestSelectedId: string | null = null;
   private latestTurnOrder: string[] = [];
+  private needsInitialFacing = false;
 
   constructor(scene: THREE.Scene, board: BoardRenderer, hpContainer: HTMLElement) {
     this.scene = scene;
@@ -104,12 +122,18 @@ export class UnitRenderer {
     return this.currentAnim !== null || this.queue.length > 0;
   }
 
-  syncUnits(units: UnitState[], selectedUnitId: string | null, turnOrder?: string[]): void {
+  syncUnits(
+    units: UnitState[],
+    selectedUnitId: string | null,
+    turnOrder?: string[],
+    activeUnitId?: string | null
+  ): void {
     this.latestUnits = units;
     this.latestSelectedId = selectedUnitId;
     if (turnOrder) {
       this.latestTurnOrder = turnOrder;
     }
+    const highlightActiveId = activeUnitId !== undefined ? activeUnitId : selectedUnitId;
 
     for (const unit of units) {
       let visual = this.visuals.get(unit.id);
@@ -118,6 +142,10 @@ export class UnitRenderer {
         this.visuals.set(unit.id, visual);
         this.scene.add(visual.root);
         this.hpContainer.appendChild(visual.hpBarEl);
+      } else if (this.needsInitialFacing && unit.alive) {
+        const yaw = this.computeInitialYaw(unit, units, this.latestTurnOrder);
+        visual.facingYaw = yaw;
+        visual.targetYaw = yaw;
       }
 
       visual.maxHp = unit.maxHp;
@@ -129,6 +157,15 @@ export class UnitRenderer {
 
       const isSelected = unit.id === selectedUnitId && unit.alive;
       this.updateBaseRing(visual, isSelected);
+
+      if (unit.alive) {
+        visual.deathClipPlayed = false;
+        const targetOpacity =
+          unit.id === highlightActiveId ? ACTIVE_UNIT_OPACITY : INACTIVE_UNIT_OPACITY;
+        this.setUnitOpacity(visual, targetOpacity);
+      } else if (unit.team === 'player') {
+        this.setUnitOpacity(visual, INACTIVE_UNIT_OPACITY);
+      }
 
       if (!this.isUnitInAnimation(unit.id)) {
         const worldPos = this.board.gridToWorld(unit.pos, 0);
@@ -142,13 +179,24 @@ export class UnitRenderer {
           visual.baseRing.visible = true;
           visual.hpBarEl.style.display = 'flex';
         } else {
-          visual.bodyGroup.rotation.set(Math.PI / 2, visual.facingYaw, 0);
-          visual.bodyGroup.position.set(0, 0.22, 0);
+          if (visual.controller.hasGlb) {
+            visual.bodyGroup.rotation.set(0, visual.facingYaw, 0);
+            visual.bodyGroup.position.set(0, 0, 0);
+            if (!visual.deathClipPlayed) {
+              visual.deathClipPlayed = true;
+              visual.controller.playClip('Death_A', false, 1);
+              visual.controller.update(10);
+            }
+          } else {
+            visual.bodyGroup.rotation.set(Math.PI / 2, visual.facingYaw, 0);
+            visual.bodyGroup.position.set(0, 0.22, 0);
+          }
           visual.baseRing.visible = false;
           visual.hpBarEl.style.display = 'none';
         }
       }
     }
+    this.needsInitialFacing = false;
   }
 
   enqueueEvents(events: GameEvent[]): void {
@@ -157,21 +205,25 @@ export class UnitRenderer {
         this.cleanupActiveVfx();
         this.queue.length = 0;
         this.currentAnim = null;
+        this.needsInitialFacing = true;
         for (const visual of this.visuals.values()) {
           visual.root.visible = true;
           visual.baseRing.visible = true;
+          visual.deathClipPlayed = false;
           visual.facingYaw = 0;
           visual.targetYaw = 0;
           visual.bodyGroup.rotation.set(0, 0, 0);
           visual.bodyGroup.scale.set(1, 1, 1);
           visual.bodyGroup.position.set(0, 0, 0);
           visual.weaponPivot.rotation.x = visual.weaponRestRotX;
+          visual.controller.resetToIdle();
           this.setFlash(visual, 0);
+          this.setUnitOpacity(visual, ACTIVE_UNIT_OPACITY);
         }
         continue;
       }
 
-      if (ev.type === 'unitMoved' && ev.path.length >= 2) {
+      if ((ev.type === 'unitMoved' || ev.type === 'moveUndone') && ev.path.length >= 2) {
         const worldPath = ev.path.map((c: GridCoord) => this.board.gridToWorld(c, 0));
         this.queue.push({
           kind: 'move',
@@ -179,7 +231,7 @@ export class UnitRenderer {
           path: worldPath,
           segmentIndex: 0,
           segmentProgress: 0,
-          stepDuration: 0.12,
+          stepDuration: ev.type === 'moveUndone' ? 0.09 : 0.12,
         });
       } else if (ev.type === 'skillUsed') {
         const caster = this.visuals.get(ev.casterId);
@@ -190,12 +242,28 @@ export class UnitRenderer {
             skillId: ev.skillId,
             origin: caster.root.position.clone(),
             targetPos: this.board.gridToWorld(ev.targetCell, 0),
+            projectile: null,
             vfxGroup: null,
+            hits: [],
             elapsed: 0,
-            duration: ev.skillId === 'arcane-burst' ? 0.42 : 0.3,
+            duration: ev.skillId === 'arcane-burst' ? 0.62 : 0.32,
           });
         }
       } else if (ev.type === 'unitAttacked') {
+        if (ev.skillId !== undefined) {
+          // Habilidade já possui skillVfx próprio: não enfileirar segundo projétil.
+          const pendingSkill = [...this.queue]
+            .reverse()
+            .find((a): a is Extract<ActiveAnimation, { kind: 'skillVfx' }> => a.kind === 'skillVfx' && a.skillId === ev.skillId);
+          if (pendingSkill) {
+            pendingSkill.hits.push({
+              targetId: ev.targetId,
+              targetHpRemaining: ev.targetHpRemaining,
+              hpApplied: false,
+            });
+          }
+          continue;
+        }
         const attacker = this.visuals.get(ev.attackerId);
         const target = this.visuals.get(ev.targetId);
         if (attacker && target) {
@@ -267,6 +335,7 @@ export class UnitRenderer {
     }
 
     for (const visual of this.visuals.values()) {
+      visual.controller.update(dt);
       if (!visual.alive || this.isUnitInAnimation(visual.id)) continue;
       const delta = shortestAngleDelta(visual.facingYaw, visual.targetYaw);
       if (Math.abs(delta) > 0.001) {
@@ -283,12 +352,37 @@ export class UnitRenderer {
   private initAnimation(anim: ActiveAnimation | null): void {
     if (!anim) return;
 
+    if (anim.kind === 'move') {
+      const visual = this.visuals.get(anim.unitId);
+      visual?.controller.playClip('Walking_A', true, 1.4);
+      return;
+    }
+
+    if (anim.kind === 'die') {
+      const visual = this.visuals.get(anim.unitId);
+      if (visual) {
+        visual.deathClipPlayed = true;
+        visual.controller.playClip('Death_A', false, 1.8);
+      }
+      return;
+    }
+
     if (anim.kind === 'meleeAttack' || anim.kind === 'rangedAttack') {
       const attacker = this.visuals.get(anim.attackerId);
       const target = this.visuals.get(anim.targetId);
       if (attacker && target) {
         anim.origin.copy(attacker.root.position);
         anim.targetPos.copy(target.root.position);
+        if (anim.kind === 'meleeAttack') {
+          attacker.controller.playClip('1H_Melee_Attack_Slice_Diagonal', false, 1.8);
+        } else {
+          const isCaster = attacker.type === 'mage' || attacker.type === 'cultist-mage';
+          attacker.controller.playClip(
+            isCaster ? 'Spellcast_Shoot' : '2H_Ranged_Shoot',
+            false,
+            1.8
+          );
+        }
       }
       if (anim.kind === 'rangedAttack') {
         const projGeo = new THREE.SphereGeometry(0.11, 8, 8);
@@ -301,8 +395,25 @@ export class UnitRenderer {
       const caster = this.visuals.get(anim.casterId);
       if (caster) {
         anim.origin.copy(caster.root.position);
+        const clip =
+          anim.skillId === 'runic-strike'
+            ? '1H_Melee_Attack_Slice_Diagonal'
+            : anim.skillId === 'marked-shot'
+              ? '2H_Ranged_Shoot'
+              : 'Spellcast_Shoot';
+        caster.controller.playClip(clip, false, 1.6);
+      }
+      if (anim.skillId === 'arcane-burst') {
+        const projGeo = new THREE.SphereGeometry(0.15, 10, 10);
+        const projMat = new THREE.MeshBasicMaterial({ color: 0x22d3ee });
+        anim.projectile = new THREE.Mesh(projGeo, projMat);
+        anim.projectile.position.copy(anim.origin).setY(0.65);
+        this.scene.add(anim.projectile);
       }
       anim.vfxGroup = this.createSkillVfxGroup(anim.skillId, anim.targetPos);
+      if (anim.skillId === 'arcane-burst') {
+        anim.vfxGroup.visible = false;
+      }
       this.scene.add(anim.vfxGroup);
     }
   }
@@ -312,29 +423,44 @@ export class UnitRenderer {
     group.position.copy(targetPos);
 
     if (skillId === 'arcane-burst') {
-      // Cross AoE ring + central arcane orb
-      const ringGeo = new THREE.RingGeometry(0.25, 0.45, 24);
+      // Onda circular expansiva + partículas radiais + flash central
+      const ringGeo = new THREE.RingGeometry(0.28, 0.52, 24);
       ringGeo.rotateX(-Math.PI / 2);
       const ringMat = new THREE.MeshBasicMaterial({
         color: 0xa855f7,
         transparent: true,
-        opacity: 0.9,
+        opacity: 0.92,
         side: THREE.DoubleSide,
         depthWrite: false,
       });
       const ring = new THREE.Mesh(ringGeo, ringMat);
       ring.position.y = 0.08;
 
-      const orbGeo = new THREE.SphereGeometry(0.28, 12, 12);
-      const orbMat = new THREE.MeshBasicMaterial({
+      const flashGeo = new THREE.SphereGeometry(0.32, 12, 12);
+      const flashMat = new THREE.MeshBasicMaterial({
         color: 0x22d3ee,
         transparent: true,
-        opacity: 0.85,
+        opacity: 0.9,
       });
-      const orb = new THREE.Mesh(orbGeo, orbMat);
-      orb.position.y = 0.45;
+      const flash = new THREE.Mesh(flashGeo, flashMat);
+      flash.position.y = 0.45;
 
-      group.add(ring, orb);
+      group.add(ring, flash);
+
+      const sparkGeo = new THREE.OctahedronGeometry(0.08, 0);
+      for (let i = 0; i < 8; i++) {
+        const angle = (i / 8) * Math.PI * 2;
+        const sparkMat = new THREE.MeshBasicMaterial({
+          color: i % 2 === 0 ? 0x22d3ee : 0xc084fc,
+          transparent: true,
+          opacity: 0.95,
+        });
+        const spark = new THREE.Mesh(sparkGeo.clone(), sparkMat);
+        spark.position.set(Math.cos(angle) * 0.25, 0.38, Math.sin(angle) * 0.25);
+        spark.userData = { radialDir: new THREE.Vector3(Math.cos(angle), 0.25, Math.sin(angle)) };
+        group.add(spark);
+      }
+      sparkGeo.dispose();
     } else if (skillId === 'runic-strike') {
       const arcGeo = new THREE.RingGeometry(0.3, 0.55, 16);
       arcGeo.rotateX(-Math.PI / 2);
@@ -420,6 +546,7 @@ export class UnitRenderer {
       if (anim.segmentIndex >= anim.path.length - 1) {
         visual.root.position.copy(anim.path[anim.path.length - 1]);
         visual.bodyGroup.position.y = 0;
+        visual.controller.resetToIdle();
 
         if (visual.team === 'player') {
           const unitState = this.latestUnits.find((u) => u.id === anim.unitId);
@@ -473,19 +600,67 @@ export class UnitRenderer {
 
       anim.elapsed += dt;
       const progress = Math.min(1, anim.elapsed / anim.duration);
+      const isBurst = anim.skillId === 'arcane-burst';
+      const impactAt = isBurst ? 0.45 : 0.25;
 
-      if (anim.vfxGroup) {
-        const maxScale = anim.skillId === 'arcane-burst' ? 3.2 : 1.6;
-        const scale = 0.5 + progress * maxScale;
-        anim.vfxGroup.scale.setScalar(scale);
-        anim.vfxGroup.children.forEach((child) => {
-          if (child instanceof THREE.Mesh && child.material instanceof THREE.MeshBasicMaterial) {
-            child.material.opacity = Math.max(0, 1 - progress);
+      if (isBurst && progress <= impactAt) {
+        if (anim.projectile) {
+          const flightT = progress / impactAt;
+          anim.projectile.position.lerpVectors(anim.origin, anim.targetPos, flightT);
+          anim.projectile.position.y = 0.65 + Math.sin(flightT * Math.PI) * 0.35 - flightT * 0.2;
+        }
+      } else {
+        if (anim.projectile) {
+          this.disposeMesh(anim.projectile);
+          anim.projectile = null;
+        }
+        const burstT = isBurst ? (progress - impactAt) / (1 - impactAt) : progress;
+        if (anim.vfxGroup) {
+          anim.vfxGroup.visible = true;
+          const maxScale = isBurst ? 2.8 : 1.6;
+          anim.vfxGroup.scale.setScalar(0.5 + burstT * maxScale);
+          anim.vfxGroup.children.forEach((child) => {
+            if (child instanceof THREE.Mesh) {
+              const radial = child.userData?.radialDir as THREE.Vector3 | undefined;
+              if (radial) {
+                child.position.set(
+                  radial.x * (0.25 + burstT * 0.85),
+                  0.38 + radial.y * burstT * 0.5,
+                  radial.z * (0.25 + burstT * 0.85)
+                );
+              }
+              if (child.material instanceof THREE.MeshBasicMaterial) {
+                child.material.opacity = Math.max(0, 1 - burstT);
+              }
+            }
+          });
+        }
+
+        const flashIntensity = Math.sin(Math.min(1, burstT * 1.4) * Math.PI);
+        for (const hit of anim.hits) {
+          const targetVisual = this.visuals.get(hit.targetId);
+          if (!targetVisual) continue;
+          if (!hit.hpApplied) {
+            hit.hpApplied = true;
+            this.applyHpBar(targetVisual, hit.targetHpRemaining, targetVisual.maxHp);
+            targetVisual.controller.playClip('Hit_A', false, 1.8);
           }
-        });
+          this.setFlash(targetVisual, flashIntensity);
+        }
       }
 
       if (progress >= 1) {
+        const caster = this.visuals.get(anim.casterId);
+        caster?.controller.resetToIdle();
+        for (const hit of anim.hits) {
+          const targetVisual = this.visuals.get(hit.targetId);
+          if (targetVisual) {
+            this.setFlash(targetVisual, 0);
+            if (targetVisual.alive) targetVisual.controller.resetToIdle();
+          }
+        }
+        this.disposeMesh(anim.projectile);
+        anim.projectile = null;
         this.disposeObjectGroup(anim.vfxGroup);
         anim.vfxGroup = null;
         this.finishCurrentAnimation();
@@ -534,8 +709,10 @@ export class UnitRenderer {
       if (progress >= 1) {
         attacker.root.position.copy(anim.origin);
         attacker.weaponPivot.rotation.x = restRot;
+        attacker.controller.resetToIdle();
         target.bodyGroup.position.set(0, 0, 0);
         target.bodyGroup.rotation.x = 0;
+        if (target.alive) target.controller.resetToIdle();
         this.setFlash(target, 0);
         this.finishCurrentAnimation();
       }
@@ -585,8 +762,10 @@ export class UnitRenderer {
       if (progress >= 1) {
         this.disposeMesh(anim.projectile);
         anim.projectile = null;
+        attacker.controller.resetToIdle();
         target.bodyGroup.position.set(0, 0, 0);
         target.bodyGroup.rotation.x = 0;
+        if (target.alive) target.controller.resetToIdle();
         this.setFlash(target, 0);
         this.finishCurrentAnimation();
       }
@@ -630,16 +809,26 @@ export class UnitRenderer {
       anim.elapsed += dt;
       const progress = Math.min(1, anim.elapsed / anim.duration);
 
-      visual.bodyGroup.rotation.x = progress * (Math.PI / 2);
-      if (visual.team === 'player') {
-        visual.bodyGroup.position.y = progress * 0.22;
+      if (visual.controller.hasGlb) {
+        if (visual.team === 'enemy' && progress > 0.65) {
+          const shrinkT = (progress - 0.65) / 0.35;
+          visual.bodyGroup.scale.setScalar(Math.max(0.05, 1 - shrinkT * 0.95));
+        }
       } else {
-        const scale = Math.max(0.05, 1 - progress * 0.85);
-        visual.bodyGroup.scale.setScalar(scale);
+        visual.bodyGroup.rotation.x = progress * (Math.PI / 2);
+        if (visual.team === 'player') {
+          visual.bodyGroup.position.y = progress * 0.22;
+        } else {
+          const scale = Math.max(0.05, 1 - progress * 0.85);
+          visual.bodyGroup.scale.setScalar(scale);
+        }
       }
 
       if (progress >= 1) {
         visual.root.visible = visual.team === 'player';
+        if (visual.team === 'player') {
+          this.setUnitOpacity(visual, INACTIVE_UNIT_OPACITY);
+        }
         visual.baseRing.visible = false;
         visual.hpBarEl.style.display = 'none';
         this.finishCurrentAnimation();
@@ -660,6 +849,7 @@ export class UnitRenderer {
     if (!anim.hpApplied) {
       anim.hpApplied = true;
       this.applyHpBar(target, anim.targetHpRemaining, target.maxHp);
+      target.controller.playClip('Hit_A', false, 1.8);
     }
 
     const span = 1 - impactStart;
@@ -687,6 +877,7 @@ export class UnitRenderer {
     if (this.currentAnim?.kind === 'rangedAttack') {
       this.disposeMesh(this.currentAnim.projectile);
     } else if (this.currentAnim?.kind === 'skillVfx') {
+      this.disposeMesh(this.currentAnim.projectile);
       this.disposeObjectGroup(this.currentAnim.vfxGroup);
     }
   }
@@ -729,11 +920,17 @@ export class UnitRenderer {
   }
 
   private isPendingAttackTarget(unitId: string): boolean {
-    const check = (a: ActiveAnimation | null): boolean =>
-      a !== null &&
-      (a.kind === 'meleeAttack' || a.kind === 'rangedAttack' || a.kind === 'heal') &&
-      a.targetId === unitId &&
-      !a.hpApplied;
+    const check = (a: ActiveAnimation | null): boolean => {
+      if (!a) return false;
+      if (a.kind === 'skillVfx') {
+        return a.hits.some((h) => h.targetId === unitId && !h.hpApplied);
+      }
+      return (
+        (a.kind === 'meleeAttack' || a.kind === 'rangedAttack' || a.kind === 'heal') &&
+        a.targetId === unitId &&
+        !a.hpApplied
+      );
+    };
     return check(this.currentAnim) || this.queue.some(check);
   }
 
@@ -744,8 +941,19 @@ export class UnitRenderer {
     visual.hpTextEl.textContent = `${hp}/${maxHp}`;
   }
 
+  private setUnitOpacity(visual: UnitVisual, opacity: number): void {
+    visual.lastOpacity = opacity;
+    const isTransparent = opacity < 1.0;
+    for (const mat of visual.controller.getMaterials()) {
+      mat.opacity = opacity;
+      mat.transparent = isTransparent;
+      mat.depthWrite = !isTransparent;
+      mat.needsUpdate = true;
+    }
+  }
+
   private setFlash(visual: UnitVisual, intensity: number, colorHex = 0xffffff): void {
-    for (const mat of visual.flashMaterials) {
+    for (const mat of visual.controller.getMaterials()) {
       mat.emissive.setHex(intensity > 0 ? colorHex : 0x000000);
       mat.emissiveIntensity = intensity * 0.75;
     }
@@ -792,6 +1000,8 @@ export class UnitRenderer {
   private createUnitVisual(unit: UnitState): UnitVisual {
     const root = new THREE.Group();
     const bodyGroup = new THREE.Group();
+    const proceduralGroup = new THREE.Group();
+    bodyGroup.add(proceduralGroup);
     root.add(bodyGroup);
 
     const flashMaterials: THREE.MeshStandardMaterial[] = [];
@@ -810,7 +1020,7 @@ export class UnitRenderer {
     baseRing.position.y = 0.024;
     root.add(baseRing);
 
-    const weaponPivot = this.buildModelByType(unit.type, bodyGroup, flashMaterials);
+    const weaponPivot = this.buildModelByType(unit.type, proceduralGroup, flashMaterials);
     const weaponRestRotX = weaponPivot.rotation.x;
 
     const hitboxGeo = new THREE.BoxGeometry(0.75, 1.25, 0.75);
@@ -836,26 +1046,95 @@ export class UnitRenderer {
     hpBarEl.appendChild(track);
     hpBarEl.appendChild(hpTextEl);
 
-    return {
+    const unitMaterials: THREE.MeshStandardMaterial[] = [];
+    const seenMaterials = new Set<THREE.Material>();
+    proceduralGroup.traverse((obj) => {
+      if (obj instanceof THREE.Mesh && obj.material instanceof THREE.MeshStandardMaterial) {
+        if (!seenMaterials.has(obj.material)) {
+          seenMaterials.add(obj.material);
+          unitMaterials.push(obj.material);
+        }
+      }
+    });
+
+    let visual!: UnitVisual;
+    const controller = new CharacterVisualController(unit.type, bodyGroup, proceduralGroup, () => {
+      if (!visual) return;
+      this.setUnitOpacity(visual, visual.lastOpacity);
+      if (!visual.alive && visual.team === 'player') {
+        visual.bodyGroup.rotation.set(0, visual.facingYaw, 0);
+        visual.bodyGroup.position.set(0, 0, 0);
+        visual.deathClipPlayed = true;
+        visual.controller.playClip('Death_A', false, 1);
+        visual.controller.update(10);
+      }
+    });
+
+    const initialYaw = this.computeInitialYaw(unit, this.latestUnits, this.latestTurnOrder);
+    bodyGroup.rotation.y = initialYaw;
+
+    visual = {
       id: unit.id,
       type: unit.type,
       team: unit.team,
       root,
       bodyGroup,
+      proceduralGroup,
+      controller,
       weaponPivot,
       weaponRestRotX,
       baseRing,
       hitbox,
       flashMaterials,
+      unitMaterials,
       hpBarEl,
       hpFillEl,
       hpTextEl,
       alive: unit.alive,
       hp: unit.hp,
       maxHp: unit.maxHp,
-      facingYaw: 0,
-      targetYaw: 0,
+      facingYaw: initialYaw,
+      targetYaw: initialYaw,
+      lastOpacity: ACTIVE_UNIT_OPACITY,
+      deathClipPlayed: false,
     };
+    return visual;
+  }
+
+  private computeInitialYaw(
+    unit: UnitState,
+    units: readonly UnitState[],
+    turnOrder?: readonly string[]
+  ): number {
+    let opponent: UnitState | null = null;
+
+    if (unit.team === 'player') {
+      opponent = findNearestLivingEnemy(unit, units, turnOrder);
+    } else {
+      const orderIndex = turnOrder
+        ? new Map<string, number>(turnOrder.map((id, idx) => [id, idx]))
+        : null;
+      let bestDist = Infinity;
+      let bestOrder = Infinity;
+      for (let i = 0; i < units.length; i++) {
+        const candidate = units[i];
+        if (candidate.team !== 'player' || !candidate.alive) continue;
+        const dist =
+          Math.abs(candidate.pos.x - unit.pos.x) +
+          Math.abs(candidate.pos.y - unit.pos.y);
+        const order = orderIndex ? (orderIndex.get(candidate.id) ?? Infinity) : i;
+        if (dist < bestDist || (dist === bestDist && order < bestOrder)) {
+          opponent = candidate;
+          bestDist = dist;
+          bestOrder = order;
+        }
+      }
+    }
+
+    if (!opponent) return 0;
+    const fromWorld = this.board.gridToWorld(unit.pos, 0);
+    const toWorld = this.board.gridToWorld(opponent.pos, 0);
+    return computeWorldYaw(fromWorld, toWorld);
   }
 
   private buildModelByType(

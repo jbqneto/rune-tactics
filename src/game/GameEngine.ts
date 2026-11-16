@@ -1,4 +1,4 @@
-import { GRID_SIZE, INITIAL_UNITS, OBSTACLES, type UnitSpawn } from '../config/gameConfig';
+import { GRID_SIZE, INITIAL_UNITS, MAPS, OBSTACLES, type MapConfig, type UnitSpawn } from '../config/gameConfig';
 import type {
   ActionResult,
   GameEvent,
@@ -6,6 +6,7 @@ import type {
   GridCoord,
   IGameEngine,
   ObstacleDef,
+  SmartActionPlan,
   UnitState,
 } from '../shared/types';
 import { nextEnemyAction } from './ai/EnemyAI';
@@ -21,13 +22,23 @@ import {
 } from './combat/CombatSystem';
 import { createUnits } from './entities/UnitFactory';
 import { GridSystem, manhattan, sameCell } from './grid/GridSystem';
+import { createRng, pickMap, randomizeUnitSpawns } from './maps/MapSystem';
 import { TurnSystem } from './turns/TurnSystem';
 
-/** Cenário da partida. O padrão é o de `gameConfig.ts`; os testes passam outros. */
+/** Cenário da partida. O padrão usa `MAPS` e `INITIAL_UNITS`; os testes podem passar overrides. */
 export interface GameSetup {
-  gridSize: number;
-  obstacles: ObstacleDef[];
-  units: UnitSpawn[];
+  gridSize?: number;
+  obstacles?: ObstacleDef[];
+  units?: UnitSpawn[];
+  seed?: number;
+  mapId?: string;
+  randomizeSpawns?: boolean;
+}
+
+interface UndoSnapshot {
+  unitId: string;
+  prevPos: GridCoord;
+  used: boolean;
 }
 
 const OK: ActionResult = { ok: true };
@@ -36,20 +47,29 @@ const copyUnit = (unit: UnitState): UnitState => ({ ...unit, pos: { ...unit.pos 
 
 export class GameEngine implements IGameEngine {
   private readonly setup: GameSetup;
-  private readonly grid: GridSystem;
+  private grid!: GridSystem;
   private readonly turns = new TurnSystem();
   private units: UnitState[] = [];
   private selectedUnitId: string | null = null;
   private events: GameEvent[] = [];
+  private undoSnapshot: UndoSnapshot | null = null;
 
-  constructor(setup: Partial<GameSetup> = {}) {
-    this.setup = { gridSize: GRID_SIZE, obstacles: OBSTACLES, units: INITIAL_UNITS, ...setup };
-    this.grid = new GridSystem(this.setup.gridSize, this.setup.obstacles);
+  private currentMapId = 'ruins';
+  private currentMapName = 'Ruínas Atuais';
+  private currentSeed = 0;
+  private lastMapId: string | null = null;
+  private matchCount = 0;
+
+  constructor(setup: GameSetup = {}) {
+    this.setup = setup;
     this.start();
   }
 
   getState(): GameStateSnapshot {
     return {
+      mapId: this.currentMapId,
+      mapName: this.currentMapName,
+      seed: this.currentSeed,
       gridSize: this.grid.size,
       obstacles: this.grid.obstacles.map((o) => ({ ...o.pos })),
       obstacleDefs: this.grid.obstacles.map((o) => ({ ...o, pos: { ...o.pos } })),
@@ -63,6 +83,7 @@ export class GameEngine implements IGameEngine {
       activationLocked: this.turns.activationLocked,
       activationTeam: this.turns.activationTeam,
       selectedUnitId: this.selectedUnitId,
+      canUndoMove: this.canUndoMoveNow(),
       winner: this.turns.winner,
     };
   }
@@ -166,11 +187,33 @@ export class GameEngine implements IGameEngine {
     if (unit.hasMoved) return fail('A unidade já se moveu nesta ativação.');
     if (!this.getReachableCells(unit.id).some((c) => sameCell(c, to))) return fail('Célula fora do alcance.');
 
+    const prevPos = { x: unit.pos.x, y: unit.pos.y };
     const path = this.grid.getPath(unit.pos, to, this.units)!;
     unit.pos = { x: to.x, y: to.y };
     unit.hasMoved = true;
+
+    if (!this.undoSnapshot || this.undoSnapshot.unitId !== unit.id) {
+      this.undoSnapshot = { unitId: unit.id, prevPos, used: false };
+    }
+
     this.events.push({ type: 'unitMoved', unitId: unit.id, path });
     this.postActionCheck(unit);
+    return OK;
+  }
+
+  undoMove(): ActionResult {
+    if (!this.canUndoMoveNow()) {
+      return fail('Não é possível desfazer o movimento agora.');
+    }
+    const unit = this.findUnit(this.turns.activeUnitId)!;
+    const currentPos = { x: unit.pos.x, y: unit.pos.y };
+    const prevPos = { x: this.undoSnapshot!.prevPos.x, y: this.undoSnapshot!.prevPos.y };
+
+    unit.pos = prevPos;
+    unit.hasMoved = false;
+    this.undoSnapshot!.used = true;
+
+    this.events.push({ type: 'moveUndone', unitId: unit.id, path: [currentPos, prevPos] });
     return OK;
   }
 
@@ -185,6 +228,7 @@ export class GameEngine implements IGameEngine {
     if (manhattan(unit.pos, target.pos) > unit.attackRange) return fail('Alvo fora do alcance.');
     if (!canAttack(unit, target, this.grid)) return fail('Sem linha de visão até o alvo.');
 
+    this.undoSnapshot = null;
     this.events.push(...resolveAttack(unit, target));
     this.postActionCheck(unit);
     return OK;
@@ -201,6 +245,124 @@ export class GameEngine implements IGameEngine {
       return fail(`Célula inválida para ${skill.name}.`);
     }
 
+    this.undoSnapshot = null;
+    this.events.push(...resolveSkill(unit, skill, targetCell, this.units, this.grid));
+    this.postActionCheck(unit);
+    return OK;
+  }
+
+  getSmartAttackPlan(targetId: string): SmartActionPlan | null {
+    if (this.turns.isOver || this.turns.turnState !== 'player_unit_active') return null;
+    const unit = this.findUnit(this.turns.activeUnitId);
+    if (!unit || !unit.alive || unit.team !== 'player' || unit.hasAttacked) return null;
+
+    const target = this.findUnit(targetId);
+    if (!target || !target.alive || target.team === unit.team) return null;
+
+    if (canAttack(unit, target, this.grid)) {
+      return { path: [{ ...unit.pos }] };
+    }
+    if (unit.hasMoved) return null;
+
+    const candidates: { path: GridCoord[]; steps: number; dist: number; cell: GridCoord }[] = [];
+    for (const cell of this.getReachableCells(unit.id)) {
+      const virtualUnit: UnitState = { ...unit, pos: cell };
+      if (!canAttack(virtualUnit, target, this.grid)) continue;
+      const path = this.grid.getPath(unit.pos, cell, this.units);
+      if (!path) continue;
+      candidates.push({
+        path,
+        steps: path.length - 1,
+        dist: manhattan(cell, target.pos),
+        cell,
+      });
+    }
+
+    if (candidates.length === 0) return null;
+    candidates.sort(
+      (a, b) =>
+        a.steps - b.steps ||
+        a.dist - b.dist ||
+        a.cell.y - b.cell.y ||
+        a.cell.x - b.cell.x
+    );
+    return { path: candidates[0].path };
+  }
+
+  smartAttack(targetId: string): ActionResult {
+    const plan = this.getSmartAttackPlan(targetId);
+    if (!plan) return fail('Ataque inteligente indisponível para este alvo.');
+
+    const unit = this.findUnit(this.turns.activeUnitId)!;
+    const target = this.findUnit(targetId)!;
+    this.undoSnapshot = null;
+
+    if (plan.path.length > 1) {
+      const dest = plan.path[plan.path.length - 1];
+      unit.pos = { x: dest.x, y: dest.y };
+      unit.hasMoved = true;
+      this.events.push({ type: 'unitMoved', unitId: unit.id, path: plan.path });
+    }
+
+    this.events.push(...resolveAttack(unit, target));
+    this.postActionCheck(unit);
+    return OK;
+  }
+
+  getSmartSkillPlan(targetCell: GridCoord): SmartActionPlan | null {
+    if (this.turns.isOver || this.turns.turnState !== 'player_unit_active') return null;
+    const unit = this.findUnit(this.turns.activeUnitId);
+    if (!unit || !unit.alive || unit.team !== 'player' || unit.hasAttacked || unit.skillCooldown > 0) {
+      return null;
+    }
+    const skill = getSkill(unit);
+    if (!skill) return null;
+
+    if (isValidSkillTarget(unit, skill, targetCell, this.units, this.grid)) {
+      return { path: [{ ...unit.pos }] };
+    }
+    if (unit.hasMoved) return null;
+
+    const candidates: { path: GridCoord[]; steps: number; dist: number; cell: GridCoord }[] = [];
+    for (const cell of this.getReachableCells(unit.id)) {
+      const virtualUnit: UnitState = { ...unit, pos: cell };
+      if (!isValidSkillTarget(virtualUnit, skill, targetCell, this.units, this.grid)) continue;
+      const path = this.grid.getPath(unit.pos, cell, this.units);
+      if (!path) continue;
+      candidates.push({
+        path,
+        steps: path.length - 1,
+        dist: manhattan(cell, targetCell),
+        cell,
+      });
+    }
+
+    if (candidates.length === 0) return null;
+    candidates.sort(
+      (a, b) =>
+        a.steps - b.steps ||
+        a.dist - b.dist ||
+        a.cell.y - b.cell.y ||
+        a.cell.x - b.cell.x
+    );
+    return { path: candidates[0].path };
+  }
+
+  smartUseSkill(targetCell: GridCoord): ActionResult {
+    const plan = this.getSmartSkillPlan(targetCell);
+    if (!plan) return fail('Habilidade inteligente indisponível para esta célula.');
+
+    const unit = this.findUnit(this.turns.activeUnitId)!;
+    const skill = getSkill(unit)!;
+    this.undoSnapshot = null;
+
+    if (plan.path.length > 1) {
+      const dest = plan.path[plan.path.length - 1];
+      unit.pos = { x: dest.x, y: dest.y };
+      unit.hasMoved = true;
+      this.events.push({ type: 'unitMoved', unitId: unit.id, path: plan.path });
+    }
+
     this.events.push(...resolveSkill(unit, skill, targetCell, this.units, this.grid));
     this.postActionCheck(unit);
     return OK;
@@ -210,6 +372,7 @@ export class GameEngine implements IGameEngine {
     const unit = this.activePlayerUnit();
     if (typeof unit === 'string') return fail(unit);
 
+    this.undoSnapshot = null;
     this.events.push(...this.turns.advanceTurn(unit, this.units));
     this.syncSelection();
     return OK;
@@ -252,9 +415,60 @@ export class GameEngine implements IGameEngine {
   }
 
   private start(): void {
-    this.units = createUnits(this.setup.units);
+    this.matchCount += 1;
+    if (this.setup.seed !== undefined) {
+      this.currentSeed = (this.setup.seed + (this.matchCount - 1)) >>> 0;
+    } else {
+      this.currentSeed = Math.floor(Math.random() * 0xffffffff) >>> 0;
+    }
+
+    const rng = createRng(this.currentSeed);
+
+    const hasCustomObstaclesOrSize =
+      (this.setup.obstacles !== undefined || this.setup.gridSize !== undefined) &&
+      this.setup.mapId === undefined;
+
+    let selectedMap: MapConfig;
+    if (hasCustomObstaclesOrSize) {
+      selectedMap = {
+        id: 'custom',
+        name: 'Custom',
+        gridSize: this.setup.gridSize ?? GRID_SIZE,
+        obstacles: this.setup.obstacles ?? OBSTACLES,
+        playerSpawnRows: [0, 1],
+        enemySpawnRows: [10, 11],
+      };
+    } else {
+      selectedMap = pickMap(MAPS, rng, this.lastMapId, this.setup.mapId);
+    }
+
+    this.currentMapId = selectedMap.id;
+    this.currentMapName = selectedMap.name;
+    this.lastMapId = selectedMap.id;
+
+    this.grid = new GridSystem(selectedMap.gridSize, selectedMap.obstacles);
+
+    const baseSpawns = this.setup.units ?? INITIAL_UNITS;
+    const shouldRandomize =
+      this.setup.randomizeSpawns !== undefined
+        ? this.setup.randomizeSpawns
+        : this.setup.units === undefined;
+
+    const resolvedSpawns = shouldRandomize
+      ? randomizeUnitSpawns(
+          baseSpawns,
+          selectedMap.gridSize,
+          selectedMap.obstacles,
+          selectedMap.playerSpawnRows,
+          selectedMap.enemySpawnRows,
+          rng
+        )
+      : baseSpawns;
+
+    this.units = createUnits(resolvedSpawns);
     this.turns.reset(this.units);
     this.events = [];
+    this.undoSnapshot = null;
     this.syncSelection();
   }
 
@@ -276,6 +490,17 @@ export class GameEngine implements IGameEngine {
     );
   }
 
+  private canUndoMoveNow(): boolean {
+    if (this.turns.isOver || this.turns.turnState !== 'player_unit_active') return false;
+    const unit = this.findUnit(this.turns.activeUnitId);
+    if (!unit || !unit.alive || unit.team !== 'player') return false;
+    if (!unit.hasMoved || unit.hasAttacked) return false;
+    if (!this.undoSnapshot || this.undoSnapshot.unitId !== unit.id || this.undoSnapshot.used) {
+      return false;
+    }
+    return !this.grid.isBlocked(this.undoSnapshot.prevPos, this.units);
+  }
+
   private activePlayerUnit(): UnitState | string {
     if (this.turns.isOver) return 'A batalha já terminou.';
     if (this.turns.turnState !== 'player_unit_active') return 'Não é a vez do jogador.';
@@ -288,11 +513,13 @@ export class GameEngine implements IGameEngine {
     const battleEvents = this.turns.checkBattleEnd(this.units);
     if (this.turns.isOver) {
       this.events.push(...battleEvents);
+      this.undoSnapshot = null;
       this.selectedUnitId = null;
       return;
     }
 
     if (!activeUnit.alive || (activeUnit.hasMoved && activeUnit.hasAttacked)) {
+      this.undoSnapshot = null;
       this.events.push(...this.turns.advanceTurn(activeUnit, this.units));
       this.syncSelection();
     }

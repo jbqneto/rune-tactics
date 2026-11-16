@@ -34,7 +34,7 @@ describe('UnitFactory', () => {
       skillId,
       skillName: SKILLS[skillId].name,
       skillCooldown: 0,
-      portraitPath: `/assets/portraits/${type}.${type === 'cleric' ? 'svg' : 'png'}`,
+      portraitPath: `/assets/portraits/${type}.png`,
     });
   });
 

@@ -80,3 +80,115 @@ Todo inimigo vivo segue o fluxo: ataca se tiver alvo válido ao alcance; senão,
 - Vitória: todos os inimigos morrem.
 - Derrota: todos os heróis morrem.
 - Vitória ou derrota têm prioridade imediata no golpe final: o turno não avança e nenhuma ativação adicional começa.
+
+## V2.3 (planejada, ainda não implementada)
+
+As regras abaixo descrevem a V2.3. Só os contratos em `src/shared/types.ts` existem; o motor e a interface ainda seguem as seções acima. O desenho técnico está em `docs/architecture.md` e as tarefas em `docs/implementation-plan.md`.
+
+Quando a V2.3 for implementada, duas partes das seções acima deixam de valer: as posições iniciais fixas das tabelas de heróis e inimigos, e a muralha central como único traçado da arena.
+
+### Ataque inteligente
+
+- Clicar em um inimigo ataca de onde o herói está, se o alvo já está ao alcance e, para ataque à distância, com linha de visão. O movimento não é gasto.
+- Se o alvo está fora de alcance e o herói ainda não se moveu, ele anda sozinho até uma célula de onde o ataque vale e ataca em seguida.
+- A célula escolhida é a de menor custo de movimento. No empate, a mais próxima do alvo. Persistindo o empate, a de menor linha e depois a de menor coluna.
+- Se nenhuma célula ao alcance do movimento serve, nada acontece.
+- Antes do clique, o jogo mostra o caminho e a célula de destino.
+- O movimento feito por um ataque inteligente não pode ser desfeito, porque o ataque já aconteceu.
+- Movimento e ataque gastos encerram a ativação, como sempre.
+- A mesma regra vale para as habilidades: o herói anda até a célula mais barata de onde a célula alvo passa a ser válida e lança.
+
+### Desfazer movimento
+
+- Depois de mover um herói, o jogador pode desfazer o movimento: o herói volta à célula de origem e pode se mover de novo.
+- Só vale uma vez por ativação. O movimento feito depois de desfazer é definitivo.
+- Só vale enquanto o herói não atacou nem usou habilidade depois de se mover.
+- Desfazer não encerra a ativação e não gasta o ataque.
+
+### Encerrar o turno pelo teclado
+
+- A tecla `E` encerra a ativação do herói ativo, como o botão "Encerrar turno (E)".
+- Ela não faz nada na vez dos inimigos, durante animações nem depois do fim da batalha.
+
+### Destaque da unidade ativa
+
+- A unidade que está agindo aparece com opacidade total. As outras unidades vivas, dos dois times, aparecem a 75%.
+- Depois do fim da batalha, todas as unidades vivas voltam à opacidade total.
+
+### Arcane Burst na tela
+
+- O mago dispara um único projétil até a célula alvo.
+- No impacto, uma explosão cobre a célula alvo e as quatro adjacentes.
+- Todos os inimigos atingidos recebem o dano ao mesmo tempo.
+- A regra não muda: 2 de dano, alcance 3, área em cruz, sem ferir aliados.
+
+### Posições iniciais sorteadas
+
+- Os heróis nascem em células sorteadas das duas linhas do sul (linhas 1 e 2). Os inimigos, nas duas linhas do norte (linhas 11 e 12).
+- Nenhuma unidade nasce em obstáculo nem na célula de outra.
+- O sorteio usa uma semente. A mesma semente repete o mesmo mapa e as mesmas posições, o que serve para testes e para reproduzir um problema.
+- A ordem de turno não depende da posição.
+
+### Mapas
+
+- Há três mapas, todos de 12×12. A cada batalha nova o jogo sorteia um, nunca o mesmo da batalha anterior.
+- Em todos, as duas linhas do sul e as duas do norte não têm obstáculos, e toda célula livre é alcançável.
+- O nome do mapa aparece no HUD.
+
+Legenda dos traçados: `#` parede e `O` pilar (bloqueiam movimento e visão); `c` caixote e `b` barril (bloqueiam só o movimento). A linha 12 está no topo e a coluna A à esquerda.
+
+**Ruínas Atuais** (`ruinas-atuais`). É o mapa da V2.2: uma muralha central com um portão largo a oeste e uma passagem estreita a leste.
+
+```
+12  . . . . . . . . . . . .
+11  . . . . . . . . . . . .
+10  . . . O . . c . O . . .
+ 9  . b . . . . . . . . c .
+ 8  . . . . . . . . . . . .
+ 7  # # . . # # # # . # # #
+ 6  . . . . . . . . . . . .
+ 5  . . . . . c c . . . . .
+ 4  . . . O . . . . O . . .
+ 3  . . . . . . . . . . b .
+ 2  . . . . . . . . . . . .
+ 1  . . . . . . . . . . . .
+    A B C D E F G H I J K L
+```
+
+**Fortaleza Abandonada** (`fortaleza-abandonada`). Um corredor central largo entre duas alas muradas. As alas dão cobertura total, mas só se entra nelas pelo corredor. Dois pilares dividem o centro.
+
+```
+12  . . . . . . . . . . . .
+11  . . . . . . . . . . . .
+10  . . # # . . . . # # . .
+ 9  . . . . . . . . . . . .
+ 8  # # # . . . . . . # # #
+ 7  . . . . c . . c . . . .
+ 6  . . . . . O O . . . . .
+ 5  # # # . . . . . . # # #
+ 4  . . . . b . . b . . . .
+ 3  . . # # . . . . # # . .
+ 2  . . . . . . . . . . . .
+ 1  . . . . . . . . . . . .
+    A B C D E F G H I J K L
+```
+
+**Pátio das Ruínas** (`patio-das-ruinas`). Um pátio aberto, com trechos de muro e pilares espalhados. Há muitas rotas e pouca cobertura contínua, o que favorece ataques à distância e flanqueio.
+
+```
+12  . . . . . . . . . . . .
+11  . . . . . . . . . . . .
+10  . O . . . c . . . . O .
+ 9  . . . . . . . . # . . .
+ 8  . . . # # . . . # . . .
+ 7  . . . . . . O . . . . b
+ 6  b . . . . O . . . . . .
+ 5  . . . # . . . # # . . .
+ 4  . . . # . . . . . . . .
+ 3  . O . . . . c . . . O .
+ 2  . . . . . . . . . . . .
+ 1  . . . . . . . . . . . .
+    A B C D E F G H I J K L
+```
+
+Os dois traçados novos são propostas. Foram conferidos por script: nenhum obstáculo nas linhas de nascimento e todas as células livres ligadas entre si. O equilíbrio de cada mapa ainda precisa ser medido em partidas simuladas.

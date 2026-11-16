@@ -16,6 +16,7 @@ export interface InputCallbacks {
     skillArea: GridCoord[]
   ) => void;
   onActionExecuted: () => void;
+  onFeedback?: (message: string) => void;
 }
 
 export interface PickHit {
@@ -290,7 +291,10 @@ export class InputManager {
 
     if (mode === 'skill') {
       const skillTargets = selectedUnit ? this.engine.getSkillTargetCells() : [];
-      const isSkillTarget = cell ? skillTargets.some((c) => sameCoord(c, cell)) : false;
+      const isDirectSkillTarget = cell ? skillTargets.some((c) => sameCoord(c, cell)) : false;
+      const smartPlan =
+        cell && selectedUnit && !isDirectSkillTarget ? this.engine.getSmartSkillPlan(cell) : null;
+      const isSkillTarget = isDirectSkillTarget || smartPlan !== null;
       this.canvas.style.cursor = isSkillTarget ? 'pointer' : 'default';
 
       if (key === this.lastHoverKey && mode === this.lastMode) return;
@@ -299,35 +303,51 @@ export class InputManager {
 
       const skillArea =
         cell && isSkillTarget ? this.engine.getSkillAreaCells(cell) : [];
-      this.callbacks.onHoverChange(isSkillTarget ? cell : null, null, skillArea);
+      this.callbacks.onHoverChange(
+        isSkillTarget ? cell : null,
+        smartPlan && smartPlan.path.length >= 2 ? smartPlan.path : null,
+        skillArea
+      );
       return;
     }
 
-    const attackable = selectedUnit ? this.engine.getAttackableTargets() : [];
-    const isAttackable = cell
-      ? attackable.some((t) => sameCoord(t.pos, cell) || (unitId !== null && t.id === unitId))
-      : false;
+    const hoveredEnemy =
+      selectedUnit && (unitId || cell)
+        ? state.units.find(
+            (u) =>
+              u.team === 'enemy' &&
+              u.alive &&
+              ((unitId && u.id === unitId) || (cell && sameCoord(u.pos, cell)))
+          ) ?? null
+        : null;
+    const smartAttackPlan = hoveredEnemy ? this.engine.getSmartAttackPlan(hoveredEnemy.id) : null;
 
     if (mode === 'attack') {
-      this.canvas.style.cursor = isAttackable ? 'pointer' : 'default';
+      this.canvas.style.cursor = hoveredEnemy ? 'pointer' : 'default';
       if (key === this.lastHoverKey && mode === this.lastMode) return;
       this.lastHoverKey = key;
       this.lastMode = mode;
-      this.callbacks.onHoverChange(isAttackable ? cell : null, null, []);
+      this.callbacks.onHoverChange(
+        hoveredEnemy ? hoveredEnemy.pos : null,
+        smartAttackPlan && smartAttackPlan.path.length >= 2 ? smartAttackPlan.path : null,
+        []
+      );
       return;
     }
 
     const reachable = selectedUnit ? this.engine.getReachableCells() : [];
     const isReachable = cell ? reachable.some((c) => sameCoord(c, cell)) : false;
 
-    this.canvas.style.cursor = isReachable || isAttackable ? 'pointer' : 'default';
+    this.canvas.style.cursor = isReachable || smartAttackPlan !== null ? 'pointer' : 'default';
 
     if (key === this.lastHoverKey && mode === this.lastMode) return;
     this.lastHoverKey = key;
     this.lastMode = mode;
 
     let path: GridCoord[] | null = null;
-    if (cell && selectedUnit && isReachable) {
+    if (smartAttackPlan && smartAttackPlan.path.length >= 2) {
+      path = smartAttackPlan.path;
+    } else if (cell && selectedUnit && isReachable) {
       path = this.engine.getPath(selectedUnit.pos, cell);
     }
 
@@ -342,33 +362,32 @@ export class InputManager {
     const state = this.engine.getState();
 
     if (mode === 'skill' && state.selectedUnitId && cell) {
-      const skillTargets = this.engine.getSkillTargetCells();
-      if (skillTargets.some((c) => sameCoord(c, cell))) {
-        const res = this.engine.useSkill(cell);
-        if (res.ok) {
-          this.callbacks.setMode('default');
-          this.lastHoverKey = null;
-          this.callbacks.onActionExecuted();
-          return;
-        }
+      const res = this.engine.smartUseSkill(cell);
+      if (res.ok) {
+        this.callbacks.setMode('default');
+        this.lastHoverKey = null;
+        this.callbacks.onActionExecuted();
+        return;
       }
-      this.callbacks.setMode('default');
-      this.lastHoverKey = null;
-      this.callbacks.onActionExecuted();
+      this.callbacks.onFeedback?.(res.reason);
       return;
     }
 
     if (state.selectedUnitId) {
-      const attackable = this.engine.getAttackableTargets();
-      const target = attackable.find(
-        (t) => (unitId && t.id === unitId) || (cell && sameCoord(t.pos, cell))
+      const clickedEnemy = state.units.find(
+        (u) =>
+          u.team === 'enemy' &&
+          u.alive &&
+          ((unitId && u.id === unitId) || (cell && sameCoord(u.pos, cell)))
       );
-      if (target) {
-        const res = this.engine.attackTarget(target.id);
+      if (clickedEnemy) {
+        const res = this.engine.smartAttack(clickedEnemy.id);
         if (res.ok) {
           this.callbacks.setMode('default');
           this.lastHoverKey = null;
           this.callbacks.onActionExecuted();
+        } else {
+          this.callbacks.onFeedback?.(res.reason);
         }
         return;
       }
