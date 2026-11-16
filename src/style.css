@@ -1,0 +1,732 @@
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background-color: #0f172a;
+  color: #e6edf3;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+#app {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+#game-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  outline: none;
+}
+
+#hud {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  user-select: none;
+}
+
+#hud button,
+#hud [data-interactive] {
+  pointer-events: auto;
+}
+
+/* Floating health bars */
+.health-bars-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.unit-hp-bar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  will-change: transform;
+}
+
+.unit-hp-track {
+  width: 48px;
+  height: 6px;
+  background: rgba(15, 23, 42, 0.9);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.unit-hp-fill {
+  height: 100%;
+  width: 100%;
+  transition: width 0.15s ease-out;
+}
+
+.unit-hp-bar--player .unit-hp-fill {
+  background: #22c55e;
+}
+
+.unit-hp-bar--enemy .unit-hp-fill {
+  background: #ef4444;
+}
+
+.unit-hp-text {
+  font-size: 10px;
+  font-weight: 700;
+  color: #f8fafc;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.95);
+}
+
+/* HUD Layout */
+.hud-top,
+.hud-bottom {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 14px;
+}
+
+.hud-bottom {
+  align-items: flex-end;
+}
+
+.hud-left-col {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: 240px;
+}
+
+.hud-top-right {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: flex-end;
+}
+
+.hud-panel {
+  background: rgba(15, 23, 42, 0.84);
+  border: 1px solid rgba(203, 166, 98, 0.38);
+  border-radius: 8px;
+  padding: 10px 14px;
+  backdrop-filter: blur(6px);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
+}
+
+.hud-title {
+  margin: 0;
+  font-size: 19px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  color: #f8fafc;
+}
+
+.hud-version {
+  color: #60a5fa;
+}
+
+.hud-subtitle {
+  margin: 2px 0 0;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  color: #cba662;
+}
+
+/* Clickable Hero Roster */
+.hud-hero-roster {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.hud-hero-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 224px;
+  padding: 6px 8px;
+  background: rgba(15, 23, 42, 0.86);
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  border-radius: 7px;
+  color: #f1f5f9;
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.15s, background-color 0.15s, transform 0.08s;
+}
+
+.hud-hero-item:hover:not(:disabled) {
+  border-color: #60a5fa;
+  background: rgba(30, 41, 59, 0.92);
+}
+
+.hud-hero-item.is-selected {
+  border-color: #facc15;
+  box-shadow: 0 0 0 1px rgba(250, 204, 21, 0.4);
+  background: rgba(30, 41, 59, 0.96);
+}
+
+.hud-hero-item.is-dead {
+  opacity: 0.45;
+  filter: grayscale(0.8);
+}
+
+.hud-hero-item:disabled {
+  cursor: default;
+}
+
+.hud-hero-portrait {
+  width: 38px;
+  height: 38px;
+  border-radius: 5px;
+  object-fit: cover;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  flex-shrink: 0;
+}
+
+.hud-hero-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.hud-hero-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+}
+
+.hud-hero-name {
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.hud-hero-pips {
+  display: flex;
+  gap: 4px;
+}
+
+.pip {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.pip.is-ready {
+  background: #4ade80;
+}
+
+.pip.is-used {
+  background: #475569;
+}
+
+.hud-hero-hp-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.hud-mini-track {
+  flex: 1;
+  height: 5px;
+  background: #1e293b;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.hud-mini-fill {
+  height: 100%;
+  background: #22c55e;
+}
+
+.hud-hero-hp {
+  font-size: 11px;
+  font-weight: 600;
+  color: #cbd5e1;
+}
+
+/* Combat Feedback Toast */
+.hud-combat-feedback {
+  align-self: flex-start;
+  background: rgba(15, 23, 42, 0.92);
+  border: 1px solid rgba(250, 204, 21, 0.6);
+  color: #fef08a;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 8px 16px;
+  border-radius: 999px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+}
+
+.hud-combat-feedback.hidden {
+  display: none;
+}
+
+/* Turn & Enemies (Top-Right) */
+.hud-turn-card {
+  min-width: 220px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.hud-turn-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  font-size: 13px;
+}
+
+.hud-label {
+  color: #94a3b8;
+}
+
+.hud-phase-badge {
+  font-weight: 700;
+}
+
+.hud-phase--player {
+  color: #60a5fa;
+}
+
+.hud-phase--enemy {
+  color: #f87171;
+}
+
+.hud-phase--victory {
+  color: #4ade80;
+}
+
+.hud-phase--defeat {
+  color: #f87171;
+}
+
+.hud-round-value {
+  font-weight: 700;
+  color: #f8fafc;
+}
+
+.hud-enemies-card {
+  min-width: 220px;
+}
+
+.hud-section-title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #cba662;
+  margin-bottom: 6px;
+}
+
+.hud-enemy-list {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.hud-enemy-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: #e2e8f0;
+}
+
+.hud-enemy-item.is-dead {
+  opacity: 0.42;
+  text-decoration: line-through;
+}
+
+.hud-enemy-portrait {
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  object-fit: cover;
+  border: 1px solid rgba(239, 68, 68, 0.45);
+}
+
+.hud-enemy-name {
+  flex: 1;
+}
+
+.hud-enemy-hp {
+  color: #fca5a5;
+  font-weight: 600;
+}
+
+/* Selected Unit Card (Bottom-Left) */
+.hud-unit-card {
+  min-width: 280px;
+  max-width: 310px;
+}
+
+.hud-unit-card.is-locked {
+  opacity: 0.72;
+}
+
+.hud-unit-empty {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+.hud-unit-empty strong {
+  color: #e2e8f0;
+}
+
+.hud-unit-card-inner {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.hud-unit-portrait {
+  width: 58px;
+  height: 58px;
+  border-radius: 6px;
+  object-fit: cover;
+  border: 1px solid rgba(203, 166, 98, 0.55);
+  flex-shrink: 0;
+}
+
+.hud-unit-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.hud-unit-header {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 6px;
+}
+
+.hud-unit-name {
+  font-size: 14px;
+  font-weight: 700;
+  color: #f8fafc;
+}
+
+.hud-unit-skill {
+  font-size: 11px;
+  color: #c084fc;
+  font-weight: 600;
+}
+
+.hud-unit-stats {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 6px;
+  font-size: 12px;
+}
+
+.hud-unit-stats div {
+  display: flex;
+  flex-direction: column;
+}
+
+.hud-unit-stats span {
+  font-size: 10px;
+  color: #94a3b8;
+}
+
+.hud-unit-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.action-pill {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 4px;
+  border: 1px solid transparent;
+}
+
+.action-pill.is-ready {
+  background: rgba(34, 197, 94, 0.16);
+  border-color: rgba(34, 197, 94, 0.45);
+  color: #86efac;
+}
+
+.action-pill.is-used {
+  background: rgba(100, 116, 139, 0.2);
+  border-color: rgba(100, 116, 139, 0.35);
+  color: #94a3b8;
+}
+
+/* Bottom-Center Action Bar */
+.hud-action-bar-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.hud-controls-status {
+  font-size: 12px;
+  font-weight: 600;
+  color: #fca5a5;
+  background: rgba(127, 29, 29, 0.65);
+  border: 1px solid rgba(248, 113, 113, 0.45);
+  border-radius: 6px;
+  padding: 4px 12px;
+}
+
+.hud-controls-status.hidden {
+  display: none;
+}
+
+.hud-action-bar {
+  display: flex;
+  gap: 8px;
+  background: rgba(15, 23, 42, 0.88);
+  border: 1px solid rgba(203, 166, 98, 0.42);
+  border-radius: 10px;
+  padding: 6px 8px;
+  backdrop-filter: blur(6px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+
+.hud-action-btn {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 14px;
+  background: rgba(30, 41, 59, 0.9);
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  border-radius: 7px;
+  color: #f8fafc;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.15s, border-color 0.15s, opacity 0.15s;
+}
+
+.hud-action-btn:hover:not(:disabled) {
+  background: rgba(51, 65, 85, 0.95);
+  border-color: #60a5fa;
+}
+
+.hud-action-btn.is-active {
+  background: rgba(37, 99, 235, 0.35);
+  border-color: #60a5fa;
+  box-shadow: 0 0 0 1px rgba(96, 165, 250, 0.45);
+}
+
+.hud-action-btn--skill.is-active {
+  background: rgba(147, 51, 234, 0.38);
+  border-color: #c084fc;
+  box-shadow: 0 0 0 1px rgba(192, 132, 252, 0.5);
+}
+
+.hud-action-btn--end {
+  background: rgba(120, 82, 26, 0.45);
+  border-color: rgba(203, 166, 98, 0.6);
+}
+
+.hud-action-btn--end:hover:not(:disabled) {
+  background: rgba(146, 100, 32, 0.65);
+  border-color: #facc15;
+}
+
+.hud-action-btn:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+}
+
+.hud-action-icon {
+  width: 22px;
+  height: 22px;
+  object-fit: contain;
+}
+
+.hud-skill-cd {
+  font-size: 11px;
+  font-weight: 800;
+  color: #fde047;
+  background: rgba(15, 23, 42, 0.85);
+  padding: 1px 5px;
+  border-radius: 4px;
+  border: 1px solid rgba(250, 204, 21, 0.4);
+}
+
+.hud-skill-cd.hidden {
+  display: none;
+}
+
+.hud-bottom-spacer {
+  width: 140px;
+}
+
+/* Generic Buttons & Modal */
+.hud-btn {
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 6px;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #f8fafc;
+  cursor: pointer;
+}
+
+.hud-btn-sm {
+  padding: 5px 10px;
+  font-size: 12px;
+}
+
+.hud-btn-primary {
+  background: #2563eb;
+  border-color: #60a5fa;
+}
+
+.hud-btn-secondary {
+  background: rgba(51, 65, 85, 0.9);
+  border-color: rgba(148, 163, 184, 0.4);
+}
+
+.hud-btn-lg {
+  padding: 12px 24px;
+  font-size: 15px;
+}
+
+.hud-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  background: rgba(9, 13, 20, 0.76);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.hud-overlay.hidden {
+  display: none;
+}
+
+.hud-modal {
+  background: #141923;
+  border: 1px solid rgba(203, 166, 98, 0.45);
+  border-radius: 12px;
+  padding: 28px 36px;
+  text-align: center;
+  max-width: 390px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.65);
+}
+
+.hud-modal-title {
+  margin: 0 0 10px;
+  font-size: 28px;
+  font-weight: 800;
+}
+
+.hud-modal-title.is-victory {
+  color: #4ade80;
+}
+
+.hud-modal-title.is-defeat {
+  color: #f87171;
+}
+
+.hud-modal-subtitle {
+  margin: 0 0 22px;
+  font-size: 14px;
+  color: #cbd5e1;
+  line-height: 1.5;
+}
+
+/* V2.2 / V2.1 Turn Status Badges & Healing Light */
+.hud-hero-status,
+.hud-enemy-status {
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 2px 5px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+.hud-hero-status.is-waiting,
+.hud-enemy-status.is-waiting {
+  color: #93c5fd;
+  background: rgba(59, 130, 246, 0.16);
+}
+
+.hud-hero-status.is-in-turn,
+.hud-enemy-status.is-in-turn {
+  color: #facc15;
+  background: rgba(250, 204, 21, 0.22);
+}
+
+.hud-hero-status.is-done,
+.hud-enemy-status.is-done {
+  color: #94a3b8;
+  background: rgba(148, 163, 184, 0.14);
+}
+
+.hud-hero-status.is-defeated,
+.hud-enemy-status.is-defeated {
+  color: #f87171;
+  background: rgba(239, 68, 68, 0.16);
+}
+
+.hud-hero-item.is-active-unit,
+.hud-enemy-item.is-active-unit {
+  border-color: rgba(250, 204, 21, 0.85);
+  box-shadow: 0 0 0 1px rgba(250, 204, 21, 0.45);
+}
+
+.hud-hero-item.is-activated {
+  opacity: 0.72;
+}
+
+.hud-hero-item.is-locked-out {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.action-pill.is-active-unit {
+  color: #facc15;
+  background: rgba(250, 204, 21, 0.16);
+  border-color: rgba(250, 204, 21, 0.45);
+}
+
+.hud-action-btn--skill.is-heal-skill {
+  border-color: rgba(52, 211, 153, 0.55);
+}
+
+.hud-action-btn--skill.is-heal-skill.is-active {
+  background: rgba(16, 185, 129, 0.28);
+  border-color: #34d399;
+  color: #ecfdf5;
+}
