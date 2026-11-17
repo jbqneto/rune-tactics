@@ -160,19 +160,67 @@ describe('V2.3: Ataque Inteligente (smartAttack / smartUseSkill)', () => {
       ],
     });
     expect(eng.smartUseSkill({ x: 0, y: 3 })).toEqual({ ok: true });
-    expect(unitOf(eng, 'melee-skeleton-1').hp).toBe(2);
+    expect(unitOf(eng, 'melee-skeleton-1').hp).toBe(1);
     expect(eng.getState().canUndoMove).toBe(false);
     expect(eng.getState().turnState).toBe('enemy_activation');
   });
 });
 
-describe('V2.3: 3 Mapas, Spawn Aleatório Determinístico e Sorteio sem Repetição', () => {
-  it('MAPS possui 3 arenas 12x12 distintas com linhas de spawn válidas', () => {
-    expect(MAPS.map((m) => m.id)).toEqual(['ruins', 'fortress', 'courtyard']);
+describe('V2.3: Mapas, Spawn Aleatório Determinístico e Sorteio sem Repetição', () => {
+  it('MAPS possui 8 arenas 12x12 distintas com linhas de spawn válidas e células livres conectadas', () => {
+    expect(MAPS.map((m) => m.id)).toEqual([
+      'ruins',
+      'fortress',
+      'courtyard',
+      'catacombs',
+      'sanctuary',
+      'gauntlet',
+      'forgotten-swamp',
+      'corrupted-sanctuary',
+    ]);
     for (const map of MAPS) {
       expect(map.gridSize).toBe(12);
       expect(map.playerSpawnRows).toEqual([0, 1]);
       expect(map.enemySpawnRows).toEqual([10, 11]);
+
+      const blocked = new Set(map.obstacles.map((o) => `${o.pos.x},${o.pos.y}`));
+      for (const obs of map.obstacles) {
+        expect(obs.pos.x).toBeGreaterThanOrEqual(0);
+        expect(obs.pos.x).toBeLessThan(map.gridSize);
+        expect(obs.pos.y).toBeGreaterThanOrEqual(0);
+        expect(obs.pos.y).toBeLessThan(map.gridSize);
+        expect([0, 1, 10, 11]).not.toContain(obs.pos.y);
+      }
+
+      // Todas as células livres precisam estar conectadas (BFS a partir de 0,0)
+      const totalFree = map.gridSize * map.gridSize - blocked.size;
+      const visited = new Set<string>(['0,0']);
+      const queue: [number, number][] = [[0, 0]];
+      while (queue.length > 0) {
+        const [cx, cy] = queue.shift()!;
+        for (const [dx, dy] of [
+          [1, 0],
+          [-1, 0],
+          [0, 1],
+          [0, -1],
+        ]) {
+          const nx = cx + dx;
+          const ny = cy + dy;
+          const key = `${nx},${ny}`;
+          if (
+            nx >= 0 &&
+            nx < map.gridSize &&
+            ny >= 0 &&
+            ny < map.gridSize &&
+            !blocked.has(key) &&
+            !visited.has(key)
+          ) {
+            visited.add(key);
+            queue.push([nx, ny]);
+          }
+        }
+      }
+      expect(visited.size).toBe(totalFree);
     }
   });
 

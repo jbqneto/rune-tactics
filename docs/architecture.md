@@ -391,3 +391,205 @@ A ação é atômica: ou acontecem o movimento e o ataque, ou nada muda e nenhum
 - A interface mostra a prévia a partir das consultas de plano. Ela não calcula alcance, caminho nem linha de visão.
 - O agrupamento de eventos de habilidade e a regra de opacidade são apresentação: ficam no renderer.
 - O atalho de teclado chama o mesmo caminho do botão, para não haver duas versões das travas.
+
+---
+
+# V4: Campanha, Atributos, Defesa e Novos Inimigos
+
+## Escopo e Diretrizes Arquiteturais
+
+A V4 (*The Ashen Campaign*) evolui a base estável da V3 preservando integralmente:
+- Separação rígida de camadas (`src/shared/`, `src/config/`, `src/game/` nunca importam Three.js nem acessam o DOM; `src/rendering/`, `src/input/`, `src/ui/` comunicam-se apenas via `IGameEngine` e contratos de `src/shared/types.ts`).
+- Ordem fixa intercalada de ativações (`TurnSystem`), grid 12×12, linha de visão (`GridSystem`), `smartAttack`, `smartUseSkill`, `undoMove`, câmera orbital e identidade visual V3.
+- Fonte única de números de partida em `src/config/gameConfig.ts`.
+
+As especificações detalhadas de regras estão distribuídas nos documentos complementares:
+- [attribute-system.md](attribute-system.md)
+- [combat-system.md](combat-system.md)
+- [campaign-design.md](campaign-design.md)
+- [enemy-design.md](enemy-design.md)
+- [balance-config.md](balance-config.md)
+
+## Novos Módulos em `src/game/`
+
+Todos os módulos novos permanecem puros (sem Three.js, sem `window`/`document`), testáveis diretamente em Node via Vitest:
+
+| Módulo | Responsabilidade |
+|---|---|
+| `src/game/attributes/AttributeSystem.ts` | Funções puras de atributos: `offensiveBonus`, `calcMaxHp`, `fortitudeResistance`, `getAttributeForAttack`, `applyAttributePoint` (inclusive regra de aumento de `fort`) e validação contra `MAX_ATTRIBUTE`. |
+| `src/game/campaign/CampaignSystem.ts` | Máquina de estado da campanha de 5 fases: inicialização de campanha, geração de `GameSetup` por fase (incluindo HP/atributos persistidos dos heróis), captura pós-vitória, recuperação (`+35%` vivos / revive `25%`), concessão e alocação de pontos, restauração por checkpoint e avanço de fase. |
+| `src/game/campaign/SaveSystem.ts` | Serialização, desserialização, validação de esquema versionado (`version: 4`, chave `'rune_tactics_v4_save'`) e persistência via interface injetável `StorageAdapter` (sem acesso direto ao DOM em `src/game/`). |
+
+> **Separação entre batalha e campanha**: `GameEngine` continua responsável exclusivamente por uma batalha tática (`IGameEngine`), recebendo via `GameSetup` o contexto da fase (`mode`, `stageNumber`, `stageName`, `mapId`, overrides de heróis/atributos/HP e `enemies`). `CampaignSystem` orquestra a jornada entre as 5 fases e instancia/reinicia o `GameEngine` a cada fase. A camada `src/main.ts` conecta `window.localStorage` ao `StorageAdapter` passado ao `SaveSystem`.
+
+## Contratos em `src/shared/types.ts`
+
+### 1. Tipos Básicos e Enumerações
+
+```ts
+export type AttributeKey = 'str' | 'dex' | 'int' | 'fort';
+export type UnitAttributes = Record<AttributeKey, number>;
+export type AttackKind = 'melee' | 'ranged' | 'magic';
+export type GameMode = 'quick-battle' | 'campaign';
+
+export type UnitType =
+  | 'knight'
+  | 'archer'
+  | 'mage'
+  | 'cleric'
+  | 'melee-skeleton'
+  | 'skeleton-archer'
+  | 'armored-skeleton'
+  | 'goblin-scout'
+  | 'cultist-mage'
+  | 'goblin-stalker'
+  | 'skeleton-shieldbearer'
+  | 'necromancer-acolyte'
+  | 'ashen-guardian';
+
+export type SkillId =
+  | 'runic-strike'
+  | 'marked-shot'
+  | 'arcane-burst'
+  | 'healing-light'
+  | 'dark-mend';
+
+export type ObstacleKind = 'wall' | 'pillar' | 'crate' | 'barrel' | 'water';
+```
+
+- `water` possui `blocksLos: false` (bloqueia movimento, não bloqueia linha de visão).
+- `MapConfig` ganha campos opcionais puramente visuais: `theme?: 'ruins' | 'swamp' | 'fortress' | 'catacombs' | 'sanctuary'` e `bridgeCells?: GridCoord[]`.
+
+### 2. Extensão de `UnitState`
+
+Campos adicionados/unificados em `UnitState`:
+
+```ts
+export interface UnitState {
+  // ...campos preservados de V2.3/V3...
+  attributes: UnitAttributes;
+  baseHp: number;
+  baseArmor: number;
+  basePower: number;
+  attackKind: AttackKind;
+  /** Poder efetivo do ataque básico (`basePower + offensiveBonus(mainAttr)`), derivado para HUD/consulta. */
+  damage: number;
+  /** Defesa efetiva (`baseArmor + fortitudeResistance(attributes.fort)`), derivada para HUD/consulta. */
+  armor: number;
+  /** Postura defensiva de 50% de mitigação até a próxima ativação da própria unidade. */
+  isGuarding: boolean;
+  /** Fase atual para unidades chefe com múltiplas fases (`1` > 50% HP, `2` <= 50% HP irreversível). */
+  bossPhase?: 1 | 2;
+}
+```
+
+- **Unificação de `defend()`**: o campo legado `shield: number` e `shieldAbsorbed?: number` são removidos (junto de `GUARD_SHIELD` e `SHIELD_WALL_BONUS` em `gameConfig.ts`). A postura defensiva é representada unicamente por `isGuarding: boolean`, e `unitGuarded` simplifica para `{ type: 'unitGuarded'; unitId: string }`. `unitAttacked` recebe `wasGuarded?: boolean` e `pendingAttackId?: string` opcionais.
+
+### 3. Ataques Anunciados (`PendingAttack`) e Snapshot
+
+```ts
+export interface PendingAttack {
+  id: string;
+  casterId: string;
+  skillName: string;
+  targetCells: GridCoord[];
+  basePower: number;
+  attackKind: AttackKind;
+  preparedRound: number;
+}
+```
+
+`GameStateSnapshot` passa a incluir:
+- `mode: GameMode`
+- `stageNumber?: number`
+- `stageName?: string`
+- `pendingAttacks: PendingAttack[]` (cópia profunda de arrays/coordenadas)
+
+### 4. Novos `GameEvent`
+
+```ts
+| { type: 'unitGuarded'; unitId: string }
+| { type: 'attackPrepared'; pendingAttack: PendingAttack }
+| {
+    type: 'pendingAttackResolved';
+    pendingAttackId: string;
+    casterId: string;
+    skillName: string;
+    targetCells: GridCoord[];
+    affectedUnitIds: string[];
+  }
+| { type: 'attackCancelled'; pendingAttackId: string; casterId: string; reason: 'caster_died' }
+| { type: 'bossPhaseChanged'; unitId: string; phase: 2; newMoveRange: number }
+```
+
+Invariantes de eventos V4:
+- Ao iniciar a ativação de `nextUnit` em `TurnSystem.advanceTurn` (ou imediatamente na sequência em `GameEngine`), `nextUnit.isGuarding` é zerado antes de emitir `activationStarted`, e quaisquer `PendingAttack` de `nextUnit.id` são resolvidos imediatamente se `nextUnit.alive === true`, emitindo `pendingAttackResolved` → `unitAttacked[]` → `unitDied[]` contíguos no mesmo lote antes de `checkBattleEnd`.
+- Se uma unidade com `PendingAttack` morre antes de sua próxima ativação, o motor cancela seus ataques pendentes imediatamente após `unitDied`, emitindo `attackCancelled`.
+- A transição do chefe para `bossPhase = 2` dispara `bossPhaseChanged` no máximo uma vez por batalha e não restaura HP.
+
+### 5. Contratos de Campanha e Persistência (`src/shared/types.ts`)
+
+```ts
+export interface StageUnitSpawn {
+  id: string;
+  type: UnitType;
+  pos: GridCoord;
+}
+
+export interface StageConfig {
+  stageNumber: number;
+  id: string;
+  name: string;
+  subtitle: string;
+  mapId: string;
+  isBossStage: boolean;
+  heroSpawns: StageUnitSpawn[];
+  enemies: StageUnitSpawn[];
+}
+
+export interface CampaignHeroProgress {
+  id: string;
+  type: 'knight' | 'archer' | 'mage' | 'cleric';
+  attributes: UnitAttributes;
+  hp: number;
+  maxHp: number;
+  unspentPoints: number;
+}
+
+export interface CampaignCheckpoint {
+  stageNumber: number;
+  heroes: CampaignHeroProgress[];
+}
+
+export type CampaignStatus = 'in_stage' | 'between_stages' | 'completed';
+
+export interface CampaignState {
+  version: 4;
+  status: CampaignStatus;
+  currentStage: number; // 1..5
+  heroes: CampaignHeroProgress[];
+  checkpoint: CampaignCheckpoint;
+}
+
+export interface StorageAdapter {
+  getItem(key: string): string | null;
+  setItem(key: string, value: string): void;
+  removeItem(key: string): void;
+}
+```
+
+## Impacto nas Camadas de Apresentação
+
+- **`BoardRenderer.ts`**:
+  - Novo obstáculo `'water'` (plano rebaixado translúcido de pântano) e renderização opcional de `bridgeCells` (tábuas de ponte de madeira) para `forgotten-swamp`.
+  - Ambientação sombria/brasas para `corrupted-sanctuary`.
+  - Nova camada de destaque `dangerCells` (`pendingAttacks`) em vermelho/âmbar pulsante no tabuleiro, indicando células ameaçadas por ataques anunciados.
+- **`CharacterVisualController.ts` & `UnitRenderer.ts`**:
+  - Inclusão dos 4 novos `UnitType` em `MODEL_SPECS` reaproveitando `.glb` KayKit com `targetHeight` e `tintHex`/`tintStrength` distintos (conforme `docs/enemy-design.md`).
+  - Aura defensiva ligada a `unit.alive && unit.isGuarding` (substituindo `unit.shield > 0`).
+  - Agrupamento visual para `pendingAttackResolved` (explosão das cinzas cobrindo todas as `targetCells` simultaneamente) e efeito de brasa em `bossPhaseChanged`.
+- **`HudManager.ts` & `main.ts`**:
+  - Tela inicial / seletor de modo (**Campanha** — Nova / Continuar — vs. **Batalha Rápida**).
+  - Exibição de atributos (`STR`, `DEX`, `INT`, `FORT`, `DEF`) no card de unidade, indicador de fase (`Fase X/5 — Nome`) e badge de `Defesa (-50%)`.
+  - Modal/Tela de **Acampamento & Evolução** entre fases (recuperação + distribuição de pontos com prévia de impacto).
+  - Modal de **Derrota** com botões **"Reiniciar fase (Checkpoint)"** e **"Nova campanha"** quando em modo campanha, mantendo **"Jogar novamente"** na Batalha Rápida.

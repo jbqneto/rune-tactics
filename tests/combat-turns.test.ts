@@ -17,10 +17,10 @@ const open = new GridSystem(8, []);
 
 describe('UnitFactory', () => {
   it.each([
-    ['knight', knightAt, { name: 'Guerreiro', maxHp: 10, moveRange: 3, damage: 2, attackRange: 1 }, 'runic-strike'],
-    ['archer', archerAt, { name: 'Arqueira', maxHp: 8, moveRange: 3, damage: 2, attackRange: 3 }, 'marked-shot'],
-    ['mage', mageAt, { name: 'Mago', maxHp: 7, moveRange: 2, damage: 1, attackRange: 2 }, 'arcane-burst'],
-    ['cleric', clericAt, { name: 'Clérigo', maxHp: 9, moveRange: 2, damage: 2, attackRange: 1 }, 'healing-light'],
+    ['knight', knightAt, { name: 'Guerreiro', maxHp: 12, moveRange: 3, damage: 2, armor: 1, attackRange: 1 }, 'runic-strike'],
+    ['archer', archerAt, { name: 'Arqueira', maxHp: 8, moveRange: 3, damage: 2, armor: 0, attackRange: 3 }, 'marked-shot'],
+    ['mage', mageAt, { name: 'Mago', maxHp: 7, moveRange: 2, damage: 2, armor: 0, attackRange: 2 }, 'arcane-burst'],
+    ['cleric', clericAt, { name: 'Clérigo', maxHp: 9, moveRange: 2, damage: 2, armor: 1, attackRange: 1 }, 'healing-light'],
   ] as const)('cria a classe %s com stats e habilidade', (type, at, stats, skillId) => {
     expect(unit(at(0, 0))).toMatchObject({
       ...stats,
@@ -39,11 +39,11 @@ describe('UnitFactory', () => {
   });
 
   it.each([
-    ['melee-skeleton', meleeAt, { name: 'Melee Skeleton', maxHp: 5, moveRange: 2, damage: 1, attackRange: 1 }],
-    ['skeleton-archer', boneArcherAt, { name: 'Skeleton Archer', maxHp: 4, moveRange: 2, damage: 1, attackRange: 3 }],
-    ['armored-skeleton', armoredAt, { name: 'Armored Skeleton', maxHp: 8, moveRange: 2, damage: 2, attackRange: 1 }],
-    ['goblin-scout', goblinAt, { name: 'Goblin Scout', maxHp: 4, moveRange: 4, damage: 1, attackRange: 1 }],
-    ['cultist-mage', cultistAt, { name: 'Cultist Mage', maxHp: 5, moveRange: 2, damage: 2, attackRange: 3 }],
+    ['melee-skeleton', meleeAt, { name: 'Melee Skeleton', maxHp: 5, moveRange: 2, damage: 2, armor: 0, attackRange: 1 }],
+    ['skeleton-archer', boneArcherAt, { name: 'Skeleton Archer', maxHp: 4, moveRange: 2, damage: 2, armor: 0, attackRange: 3 }],
+    ['armored-skeleton', armoredAt, { name: 'Armored Skeleton', maxHp: 11, moveRange: 2, damage: 3, armor: 2, attackRange: 1 }],
+    ['goblin-scout', goblinAt, { name: 'Goblin Scout', maxHp: 4, moveRange: 4, damage: 2, armor: 0, attackRange: 1 }],
+    ['cultist-mage', cultistAt, { name: 'Cultist Mage', maxHp: 6, moveRange: 2, damage: 3, armor: 0, attackRange: 3 }],
   ] as const)('cria o inimigo %s sem habilidade', (type, at, stats) => {
     expect(unit(at(0, 0))).toMatchObject({
       ...stats,
@@ -55,10 +55,10 @@ describe('UnitFactory', () => {
     });
   });
 
-  it('as habilidades têm dano/cura, alcance, recarga e área da V2.2', () => {
-    expect(SKILLS['runic-strike']).toMatchObject({ name: 'Runic Strike', targetTeam: 'enemy', damage: 3, heal: 0, range: 1, cooldown: 2, area: 'single' });
-    expect(SKILLS['marked-shot']).toMatchObject({ name: 'Marked Shot', targetTeam: 'enemy', damage: 3, heal: 0, range: 3, cooldown: 2, area: 'single' });
-    expect(SKILLS['arcane-burst']).toMatchObject({ name: 'Arcane Burst', targetTeam: 'enemy', damage: 2, heal: 0, range: 3, cooldown: 3, area: 'cross' });
+  it('as habilidades têm dano/cura, alcance, recarga e área da V4', () => {
+    expect(SKILLS['runic-strike']).toMatchObject({ name: 'Runic Strike', targetTeam: 'enemy', damage: 4, heal: 0, attackKind: 'melee', range: 1, cooldown: 2, area: 'single' });
+    expect(SKILLS['marked-shot']).toMatchObject({ name: 'Marked Shot', targetTeam: 'enemy', damage: 3, heal: 0, attackKind: 'ranged', range: 3, cooldown: 2, area: 'single' });
+    expect(SKILLS['arcane-burst']).toMatchObject({ name: 'Arcane Burst', targetTeam: 'enemy', damage: 2, heal: 0, attackKind: 'magic', range: 3, cooldown: 3, area: 'cross' });
     expect(SKILLS['healing-light']).toMatchObject({ name: 'Healing Light', targetTeam: 'ally', damage: 0, heal: 3, range: 3, cooldown: 2, area: 'single' });
   });
 
@@ -174,7 +174,7 @@ describe('CombatSystem: habilidades', () => {
     expect(getSkillAreaCells(SKILLS['arcane-burst'], { x: 8, y: 0 }, open)).toEqual([]);
   });
 
-  it('Runic Strike: 3 de dano corpo a corpo e recarga de 2', () => {
+  it('Runic Strike: 4 de dano corpo a corpo e recarga de 2', () => {
     const knight = unit(knightAt(1, 1));
     const skeleton = unit(meleeAt(1, 2));
     const events = resolveSkill(knight, SKILLS['runic-strike'], skeleton.pos, [knight, skeleton], open);
@@ -191,8 +191,8 @@ describe('CombatSystem: habilidades', () => {
         type: 'unitAttacked',
         attackerId: 'knight-1',
         targetId: 'melee-skeleton-1',
-        damage: 3,
-        targetHpRemaining: 2,
+        damage: 4,
+        targetHpRemaining: 1,
         isRanged: false,
         skillId: 'runic-strike',
       },
@@ -246,12 +246,15 @@ describe('CombatSystem: habilidades', () => {
       affectedUnitIds: ['center', 'right', 'up'],
     });
     expect(events.slice(1).map((e) => e.type)).toEqual(['unitAttacked', 'unitAttacked', 'unitAttacked']);
-    for (const e of events.slice(1)) expect(e).toMatchObject({ damage: 2, isRanged: true, skillId: 'arcane-burst' });
+    expect(events[1]).toMatchObject({ damage: 2, isRanged: true, skillId: 'arcane-burst' });
+    expect(events[2]).toMatchObject({ damage: 2, isRanged: true, skillId: 'arcane-burst' });
+    // Armored Skeleton tem 2 DEF -> max(1, 2 - 2) = 1 de dano
+    expect(events[3]).toMatchObject({ damage: 1, isRanged: true, skillId: 'arcane-burst' });
 
-    expect([center.hp, right.hp, up.hp]).toEqual([3, 3, 6]);
+    expect([center.hp, right.hp, up.hp]).toEqual([3, 3, 10]);
     expect([diagonal.hp, far.hp]).toEqual([5, 5]);
     // O guerreiro está em (1,1), dentro da cruz, e não é ferido.
-    expect(knight.hp).toBe(10);
+    expect(knight.hp).toBe(12);
     expect(mage).toMatchObject({ hp: 7, hasAttacked: true, skillCooldown: 3 });
   });
 
@@ -331,11 +334,11 @@ describe('CombatSystem: habilidades', () => {
         type: 'unitHealed',
         casterId: 'cleric-1',
         targetId: 'knight-1',
-        amount: 2,
-        targetHpAfter: 10,
+        amount: 3,
+        targetHpAfter: 11,
       },
     ]);
-    expect(knight.hp).toBe(10);
+    expect(knight.hp).toBe(11);
     expect(cleric).toMatchObject({ hasAttacked: true, skillCooldown: 2 });
   });
 });

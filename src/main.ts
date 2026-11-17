@@ -1,11 +1,20 @@
 import './style.css';
-import { SKILLS } from './config/gameConfig';
-import { GameEngine } from './game/GameEngine';
+import { MAPS, SKILLS } from './config/gameConfig';
+import { CampaignSystem } from './game/campaign/CampaignSystem';
+import { SaveSystem } from './game/campaign/SaveSystem';
+import { GameEngine, type GameSetup } from './game/GameEngine';
 import { InputManager, type InteractionMode } from './input/InputManager';
 import { BoardRenderer } from './rendering/BoardRenderer';
-import { SceneManager } from './rendering/SceneManager';
+import { type SceneAtmosphereConfig, SceneManager } from './rendering/SceneManager';
 import { UnitRenderer } from './rendering/UnitRenderer';
-import type { GameEvent, GameStateSnapshot, GridCoord, IGameEngine, Phase, TurnState } from './shared/types';
+import type {
+  GameEvent,
+  GameStateSnapshot,
+  GridCoord,
+  IGameEngine,
+  Phase,
+  TurnState,
+} from './shared/types';
 import { HudManager } from './ui/HudManager';
 
 const canvas = document.getElementById('game-canvas') as HTMLCanvasElement | null;
@@ -15,11 +24,64 @@ if (!canvas || !hudEl) {
   throw new Error('Elementos #game-canvas ou #hud não encontrados no DOM.');
 }
 
-const engine: IGameEngine = new GameEngine();
+const saveSystem = new SaveSystem(window.localStorage);
+const campaignSystem = new CampaignSystem(saveSystem);
+
+let engine: IGameEngine = new GameEngine();
+
+const engineProxy: IGameEngine = {
+  getState: () => engine.getState(),
+  selectUnit: (unitId) => engine.selectUnit(unitId),
+  getReachableCells: (unitId) => engine.getReachableCells(unitId),
+  getPath: (from, to) => engine.getPath(from, to),
+  getAttackableTargets: (unitId) => engine.getAttackableTargets(unitId),
+  hasLineOfSight: (from, to) => engine.hasLineOfSight(from, to),
+  getAttackRangeCells: (unitId) => engine.getAttackRangeCells(unitId),
+  getSkillRangeCells: (unitId) => engine.getSkillRangeCells(unitId),
+  getSkillTargetCells: (unitId) => engine.getSkillTargetCells(unitId),
+  getSkillAreaCells: (targetCell, unitId) => engine.getSkillAreaCells(targetCell, unitId),
+  moveSelectedUnit: (to) => engine.moveSelectedUnit(to),
+  attackTarget: (targetId) => engine.attackTarget(targetId),
+  useSkill: (targetCell) => engine.useSkill(targetCell),
+  undoMove: () => engine.undoMove(),
+  getSmartAttackPlan: (targetId) => engine.getSmartAttackPlan(targetId),
+  smartAttack: (targetId) => engine.smartAttack(targetId),
+  getSmartSkillPlan: (targetCell) => engine.getSmartSkillPlan(targetCell),
+  smartUseSkill: (targetCell) => engine.smartUseSkill(targetCell),
+  defend: () => engine.defend(),
+  endPlayerTurn: () => engine.endPlayerTurn(),
+  executeNextEnemyAction: () => engine.executeNextEnemyAction(),
+  reset: () => engine.reset(),
+  consumeEvents: () => engine.consumeEvents(),
+};
+
 const sceneManager = new SceneManager(canvas);
 const boardRenderer = new BoardRenderer(sceneManager.scene);
 
 const TURN_TIMER_SECONDS = 60;
+
+const DEFAULT_ATMOSPHERE: SceneAtmosphereConfig = {
+  backgroundColor: 0x0c1424,
+  fogColor: 0x0c1424,
+  fogDensity: 0.012,
+  ambientColor: 0x94a3b8,
+  ambientIntensity: 0.48,
+  hemiSkyColor: 0x8ec5e8,
+  hemiGroundColor: 0x1e3536,
+  hemiIntensity: 0.62,
+  dirColor: 0xfff1d6,
+  dirIntensity: 1.38,
+  dirPosition: [11, 18, 8],
+  rimColor: 0x7dd3fc,
+  rimIntensity: 0.55,
+  rimPosition: [-10, 10, -11],
+  pointLights: [
+    { position: [-6.65, 1.75, -6.65], color: 0xf59e0b, intensity: 3.2, distance: 14, decay: 1.5 },
+    { position: [6.65, 1.75, -6.65], color: 0xf59e0b, intensity: 3.2, distance: 14, decay: 1.5 },
+    { position: [-6.65, 1.75, 6.65], color: 0xf59e0b, intensity: 3.2, distance: 14, decay: 1.5 },
+    { position: [6.65, 1.75, 6.65], color: 0xf59e0b, intensity: 3.2, distance: 14, decay: 1.5 },
+  ],
+};
 
 let mode: InteractionMode = 'default';
 let hoverCell: GridCoord | null = null;
@@ -32,9 +94,87 @@ let turnTimerSeconds = TURN_TIMER_SECONDS;
 let lastTimerActiveId: string | null = null;
 let lastTimerRound = 0;
 let lastTimerTurnState: TurnState | null = null;
+let isMenuOpen = true;
+let campaignVictoryHandled = false;
+
+function rebuildBoardForState(state: GameStateSnapshot): void {
+  const map = MAPS.find((m) => m.id === state.mapId);
+  boardRenderer.buildBoard(
+    state.gridSize,
+    state.obstacleDefs,
+    map ? { mapId: map.id, theme: map.theme, bridgeCells: map.bridgeCells } : state.mapId
+  );
+  sceneManager.applyAtmosphere(boardRenderer.getAtmosphere() ?? DEFAULT_ATMOSPHERE);
+}
+
+function getUniqueDangerCells(state: GameStateSnapshot): GridCoord[] {
+  const seen = new Set<string>();
+  const cells: GridCoord[] = [];
+  for (const pending of state.pendingAttacks) {
+    for (const cell of pending.targetCells) {
+      const key = `${cell.x},${cell.y}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        cells.push(cell);
+      }
+    }
+  }
+  return cells;
+}
+
+function startBattleWithSetup(setup: GameSetup): void {
+  engine = new GameEngine(setup);
+  const state = engine.getState();
+  rebuildBoardForState(state);
+  mode = 'default';
+  clearHover();
+  enemyStepTimer = 0;
+  turnTimerSeconds = TURN_TIMER_SECONDS;
+  lastTimerActiveId = null;
+  lastTimerRound = 0;
+  lastTimerTurnState = null;
+  lastPhase = state.phase;
+  campaignVictoryHandled = false;
+  isMenuOpen = false;
+  hudManager.hideOverlays();
+  syncFromEngine();
+}
+
+function startQuickBattle(): void {
+  startBattleWithSetup({ mode: 'quick-battle' });
+}
+
+function startNewCampaign(): void {
+  campaignSystem.startNewCampaign();
+  startBattleWithSetup(campaignSystem.createStageGameSetup());
+}
+
+function continueCampaign(): void {
+  const loaded = campaignSystem.loadCampaign();
+  if (!loaded) {
+    hudManager.showModeMenu(null);
+    return;
+  }
+
+  if (loaded.status === 'between_stages') {
+    isMenuOpen = true;
+    hudManager.showCampOverlay(loaded, campaignSystem.canAdvanceToNextStage());
+    return;
+  }
+
+  if (loaded.status === 'completed') {
+    isMenuOpen = true;
+    hudManager.showCampaignCompletedOverlay();
+    return;
+  }
+
+  startBattleWithSetup(campaignSystem.createStageGameSetup());
+}
 
 function handleEndTurn(): void {
-  if (unitRenderer.isAnimating || engine.getState().turnState !== 'player_unit_active') return;
+  if (isMenuOpen || unitRenderer.isAnimating || engine.getState().turnState !== 'player_unit_active') {
+    return;
+  }
   const res = engine.endPlayerTurn();
   if (res.ok) {
     mode = 'default';
@@ -44,12 +184,24 @@ function handleEndTurn(): void {
   }
 }
 
+function handleDefend(): void {
+  if (isMenuOpen || unitRenderer.isAnimating || engine.getState().turnState !== 'player_unit_active') {
+    return;
+  }
+  const res = engine.defend();
+  if (res.ok) {
+    mode = 'default';
+    clearHover();
+    syncFromEngine();
+  }
+}
+
 const hudManager = new HudManager(hudEl, {
   onSelectUnit: (_unitId) => {
     // V2.1: troca manual de unidade bloqueada pela ordem fixa de turnos.
   },
   onSetMode: (nextMode) => {
-    if (unitRenderer.isAnimating || engine.getState().phase !== 'player') return;
+    if (isMenuOpen || unitRenderer.isAnimating || engine.getState().phase !== 'player') return;
     mode = mode === nextMode && nextMode !== 'default' ? 'default' : nextMode;
     clearHover();
     refreshHighlights();
@@ -59,8 +211,11 @@ const hudManager = new HudManager(hudEl, {
       : false;
     hudManager.update(state, mode, unitRenderer.isAnimating, hasSkillTargets);
   },
+  onDefend: handleDefend,
   onUndoMove: () => {
-    if (unitRenderer.isAnimating || engine.getState().turnState !== 'player_unit_active') return;
+    if (isMenuOpen || unitRenderer.isAnimating || engine.getState().turnState !== 'player_unit_active') {
+      return;
+    }
     const res = engine.undoMove();
     if (res.ok) {
       mode = 'default';
@@ -70,9 +225,15 @@ const hudManager = new HudManager(hudEl, {
   },
   onEndTurn: handleEndTurn,
   onReset: () => {
+    const current = engine.getState();
+    if (current.mode === 'campaign') {
+      campaignSystem.restartCurrentStage();
+      startBattleWithSetup(campaignSystem.createStageGameSetup());
+      return;
+    }
     engine.reset();
     const newState = engine.getState();
-    boardRenderer.buildBoard(newState.gridSize, newState.obstacleDefs);
+    rebuildBoardForState(newState);
     mode = 'default';
     clearHover();
     enemyStepTimer = 0;
@@ -80,7 +241,36 @@ const hudManager = new HudManager(hudEl, {
     lastTimerActiveId = null;
     lastTimerRound = 0;
     lastTimerTurnState = null;
+    campaignVictoryHandled = false;
+    hudManager.hideOverlays();
     syncFromEngine();
+  },
+  onNewCampaign: startNewCampaign,
+  onContinueCampaign: continueCampaign,
+  onQuickBattle: startQuickBattle,
+  onOpenMenu: () => {
+    isMenuOpen = true;
+    hudManager.showModeMenu(saveSystem.load());
+  },
+  onAllocateAttribute: (heroId, attr) => {
+    const res = campaignSystem.allocateHeroAttribute(heroId, attr);
+    if (res.ok) {
+      hudManager.showCampOverlay(res.state, campaignSystem.canAdvanceToNextStage());
+    } else {
+      hudManager.showFeedback(res.reason);
+    }
+  },
+  onAdvanceStage: () => {
+    const res = campaignSystem.advanceToNextStage();
+    if (!res.ok) {
+      hudManager.showFeedback(res.reason);
+      return;
+    }
+    startBattleWithSetup(campaignSystem.createStageGameSetup());
+  },
+  onRestartStageCheckpoint: () => {
+    campaignSystem.restartCurrentStage();
+    startBattleWithSetup(campaignSystem.createStageGameSetup());
   },
 });
 
@@ -104,6 +294,8 @@ window.addEventListener('keydown', (e) => {
   if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
   if (e.key === 'e' || e.key === 'E') {
     handleEndTurn();
+  } else if (e.key === 'g' || e.key === 'G') {
+    handleDefend();
   }
 });
 
@@ -121,12 +313,15 @@ function clearHover(): void {
 
 function refreshHighlights(): void {
   const state = engine.getState();
+  const dangerCells = getUniqueDangerCells(state);
+
   if (state.phase !== 'player' || unitRenderer.isAnimating || !state.selectedUnitId) {
     boardRenderer.setHighlights({
       reachable: [],
       attackable: [],
       skillTargets: [],
       skillArea: [],
+      dangerCells,
       hoverCell: null,
       path: null,
     });
@@ -143,6 +338,7 @@ function refreshHighlights(): void {
       skillTargets: engine.getSkillTargetCells(),
       skillArea: hoverSkillArea,
       skillMode,
+      dangerCells,
       hoverCell,
       path: null,
     });
@@ -156,6 +352,7 @@ function refreshHighlights(): void {
       attackable: engine.getAttackableTargets().map((u) => u.pos),
       skillTargets: [],
       skillArea: [],
+      dangerCells,
       hoverCell,
       path: null,
     });
@@ -167,6 +364,7 @@ function refreshHighlights(): void {
     attackable: engine.getAttackableTargets().map((u) => u.pos),
     skillTargets: [],
     skillArea: [],
+    dangerCells,
     hoverCell,
     path: hoverPath,
   });
@@ -186,13 +384,59 @@ function emitCombatFeedback(events: GameEvent[]): void {
       if (caster && target) {
         hudManager.showFeedback(`${caster.name} curou ${target.name} (+${ev.amount} HP)!`);
       }
+    } else if (ev.type === 'unitGuarded') {
+      const unit = units.find((u) => u.id === ev.unitId);
+      if (unit) {
+        hudManager.showFeedback(`${unit.name} assumiu postura defensiva (-50% dano)!`);
+      }
+    } else if (ev.type === 'attackPrepared') {
+      const caster = units.find((u) => u.id === ev.pendingAttack.casterId);
+      hudManager.showFeedback(
+        `${caster?.name ?? 'Inimigo'} está preparando ${ev.pendingAttack.skillName}!`
+      );
+    } else if (ev.type === 'pendingAttackResolved') {
+      const caster = units.find((u) => u.id === ev.casterId);
+      hudManager.showFeedback(
+        `${caster?.name ?? 'Inimigo'} desencadeou ${ev.skillName}!`
+      );
+    } else if (ev.type === 'attackCancelled') {
+      const caster = units.find((u) => u.id === ev.casterId);
+      hudManager.showFeedback(
+        `Ataque anunciado de ${caster?.name ?? 'inimigo'} foi cancelado!`
+      );
+    } else if (ev.type === 'bossPhaseChanged') {
+      const boss = units.find((u) => u.id === ev.unitId);
+      hudManager.showFeedback(
+        `🔥 ${boss?.name ?? 'Guardião das Cinzas'} entrou na Fase 2: Fúria das Cinzas!`
+      );
     } else if (ev.type === 'unitAttacked' && !ev.skillId) {
       const attacker = units.find((u) => u.id === ev.attackerId);
       const target = units.find((u) => u.id === ev.targetId);
       if (attacker && target) {
-        hudManager.showFeedback(`${attacker.name} causou ${ev.damage} de dano em ${target.name}!`);
+        const guardNote = ev.wasGuarded ? ' (🛡 -50%)' : '';
+        hudManager.showFeedback(`${attacker.name} causou ${ev.damage} de dano em ${target.name}${guardNote}!`);
       }
     }
+  }
+}
+
+function handleCampaignVictoryIfNeeded(state: GameStateSnapshot): void {
+  if (
+    state.mode !== 'campaign' ||
+    state.phase !== 'victory' ||
+    unitRenderer.isAnimating ||
+    campaignVictoryHandled
+  ) {
+    return;
+  }
+
+  campaignVictoryHandled = true;
+  isMenuOpen = true;
+  const updated = campaignSystem.completeStage(state);
+  if (updated.status === 'completed') {
+    hudManager.showCampaignCompletedOverlay();
+  } else {
+    hudManager.showCampOverlay(updated, campaignSystem.canAdvanceToNextStage());
   }
 }
 
@@ -235,12 +479,13 @@ function syncFromEngine(): void {
     : false;
   hudManager.update(state, mode, unitRenderer.isAnimating, hasSkillTargets);
   updateTurnTimerState(state);
+  handleCampaignVictoryIfNeeded(state);
 }
 
 new InputManager(
   canvas,
   sceneManager.camera,
-  engine,
+  engineProxy,
   boardRenderer,
   unitRenderer,
   {
@@ -265,12 +510,14 @@ new InputManager(
   sceneManager.cameraController
 );
 
-// Initial setup
+// Initial setup: exibe seletor de modo com o cenário 3D ao fundo
 const initialState = engine.getState();
-boardRenderer.buildBoard(initialState.gridSize, initialState.obstacleDefs);
+rebuildBoardForState(initialState);
 syncFromEngine();
+hudManager.showModeMenu(saveSystem.load());
 
 sceneManager.start((dt) => {
+  boardRenderer.update(dt, sceneManager.cameraController.currentAzimuth);
   unitRenderer.update(dt, sceneManager.camera);
 
   const animatingNow = unitRenderer.isAnimating;
@@ -281,8 +528,11 @@ sceneManager.start((dt) => {
       : false;
     refreshHighlights();
     hudManager.update(state, mode, false, hasSkillTargets);
+    handleCampaignVictoryIfNeeded(state);
   }
   wasAnimating = animatingNow;
+
+  if (isMenuOpen) return;
 
   const state = engine.getState();
   if (state.turnState === 'player_unit_active') {

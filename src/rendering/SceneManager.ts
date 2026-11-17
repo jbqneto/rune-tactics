@@ -1,6 +1,32 @@
 import * as THREE from 'three';
 import { CameraController } from './CameraController';
 
+export interface ScenePointLightConfig {
+  position: readonly [number, number, number];
+  color?: number;
+  intensity?: number;
+  distance?: number;
+  decay?: number;
+}
+
+export interface SceneAtmosphereConfig {
+  backgroundColor?: number;
+  fogColor?: number;
+  fogDensity?: number;
+  ambientColor?: number;
+  ambientIntensity?: number;
+  hemiSkyColor?: number;
+  hemiGroundColor?: number;
+  hemiIntensity?: number;
+  dirColor?: number;
+  dirIntensity?: number;
+  dirPosition?: readonly [number, number, number];
+  rimColor?: number;
+  rimIntensity?: number;
+  rimPosition?: readonly [number, number, number];
+  pointLights?: readonly ScenePointLightConfig[];
+}
+
 export class SceneManager {
   readonly scene: THREE.Scene;
   readonly camera: THREE.OrthographicCamera;
@@ -10,6 +36,10 @@ export class SceneManager {
   private readonly canvas: HTMLCanvasElement;
   private readonly frustumSize = 14.8;
   private readonly torchLights: { light: THREE.PointLight; baseIntensity: number; phase: number }[] = [];
+  private ambientLight!: THREE.AmbientLight;
+  private hemiLight!: THREE.HemisphereLight;
+  private dirLight!: THREE.DirectionalLight;
+  private rimLight!: THREE.DirectionalLight;
   private rafId: number | null = null;
   private lastTime = 0;
   private elapsed = 0;
@@ -44,6 +74,9 @@ export class SceneManager {
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 1.08;
+    this.renderer.outputColorSpace = THREE.SRGBColorSpace;
 
     this.setupLights();
 
@@ -54,30 +87,35 @@ export class SceneManager {
 
   private setupLights(): void {
     // Soft ambient fill
-    const ambient = new THREE.AmbientLight(0x94a3b8, 0.48);
-    this.scene.add(ambient);
+    this.ambientLight = new THREE.AmbientLight(0x94a3b8, 0.48);
+    this.scene.add(this.ambientLight);
 
     // Blue-teal hemisphere sky/ground fill for FFT-style diorama contrast
-    const hemi = new THREE.HemisphereLight(0x8ec5e8, 0x1e3536, 0.62);
-    this.scene.add(hemi);
+    this.hemiLight = new THREE.HemisphereLight(0x8ec5e8, 0x1e3536, 0.62);
+    this.scene.add(this.hemiLight);
 
     // Crisp warm directional key light with shadows
-    const dirLight = new THREE.DirectionalLight(0xfff1d6, 1.38);
-    dirLight.position.set(11, 18, 8);
-    dirLight.castShadow = true;
-    dirLight.shadow.mapSize.width = 2048;
-    dirLight.shadow.mapSize.height = 2048;
-    dirLight.shadow.camera.near = 1;
-    dirLight.shadow.camera.far = 55;
+    this.dirLight = new THREE.DirectionalLight(0xfff1d6, 1.38);
+    this.dirLight.position.set(11, 18, 8);
+    this.dirLight.castShadow = true;
+    this.dirLight.shadow.mapSize.width = 2048;
+    this.dirLight.shadow.mapSize.height = 2048;
+    this.dirLight.shadow.camera.near = 1;
+    this.dirLight.shadow.camera.far = 55;
     const d = 13.5;
-    dirLight.shadow.camera.left = -d;
-    dirLight.shadow.camera.right = d;
-    dirLight.shadow.camera.top = d;
-    dirLight.shadow.camera.bottom = -d;
-    dirLight.shadow.bias = -0.0005;
-    this.scene.add(dirLight);
+    this.dirLight.shadow.camera.left = -d;
+    this.dirLight.shadow.camera.right = d;
+    this.dirLight.shadow.camera.top = d;
+    this.dirLight.shadow.camera.bottom = -d;
+    this.dirLight.shadow.bias = -0.0005;
+    this.scene.add(this.dirLight);
 
-    // Warm torch PointLights around the 12x12 arena
+    // Cool rim light for crisp low-poly silhouette separation
+    this.rimLight = new THREE.DirectionalLight(0x7dd3fc, 0.55);
+    this.rimLight.position.set(-10, 10, -11);
+    this.scene.add(this.rimLight);
+
+    // Warm torch PointLights around the 12x12 arena (fixed 4-light pool)
     const torchPositions: [number, number, number][] = [
       [-6.65, 1.75, -6.65],
       [6.65, 1.75, -6.65],
@@ -94,6 +132,93 @@ export class SceneManager {
         phase: idx * 1.7,
       });
     });
+  }
+
+  /**
+   * Updates scene background, fog, key/fill lights, and reconfigures the fixed
+   * 4-PointLight pool in place without adding/removing lights (avoids shader recompilation).
+   */
+  applyAtmosphere(config: SceneAtmosphereConfig): void {
+    if (config.backgroundColor !== undefined) {
+      if (this.scene.background instanceof THREE.Color) {
+        this.scene.background.setHex(config.backgroundColor);
+      } else {
+        this.scene.background = new THREE.Color(config.backgroundColor);
+      }
+    }
+
+    if (this.scene.fog instanceof THREE.FogExp2) {
+      if (config.fogColor !== undefined) {
+        this.scene.fog.color.setHex(config.fogColor);
+      }
+      if (config.fogDensity !== undefined) {
+        this.scene.fog.density = config.fogDensity;
+      }
+    }
+
+    if (config.ambientColor !== undefined) {
+      this.ambientLight.color.setHex(config.ambientColor);
+    }
+    if (config.ambientIntensity !== undefined) {
+      this.ambientLight.intensity = config.ambientIntensity;
+    }
+
+    if (config.hemiSkyColor !== undefined) {
+      this.hemiLight.color.setHex(config.hemiSkyColor);
+    }
+    if (config.hemiGroundColor !== undefined) {
+      this.hemiLight.groundColor.setHex(config.hemiGroundColor);
+    }
+    if (config.hemiIntensity !== undefined) {
+      this.hemiLight.intensity = config.hemiIntensity;
+    }
+
+    if (config.dirColor !== undefined) {
+      this.dirLight.color.setHex(config.dirColor);
+    }
+    if (config.dirIntensity !== undefined) {
+      this.dirLight.intensity = config.dirIntensity;
+    }
+    if (config.dirPosition !== undefined) {
+      this.dirLight.position.set(config.dirPosition[0], config.dirPosition[1], config.dirPosition[2]);
+    }
+
+    if (config.rimColor !== undefined) {
+      this.rimLight.color.setHex(config.rimColor);
+    }
+    if (config.rimIntensity !== undefined) {
+      this.rimLight.intensity = config.rimIntensity;
+    }
+    if (config.rimPosition !== undefined) {
+      this.rimLight.position.set(config.rimPosition[0], config.rimPosition[1], config.rimPosition[2]);
+    }
+
+    if (config.pointLights !== undefined) {
+      for (let i = 0; i < this.torchLights.length; i++) {
+        const torch = this.torchLights[i];
+        const cfg = config.pointLights[i];
+        if (cfg) {
+          torch.light.position.set(cfg.position[0], cfg.position[1], cfg.position[2]);
+          if (cfg.color !== undefined) {
+            torch.light.color.setHex(cfg.color);
+          }
+          if (cfg.distance !== undefined) {
+            torch.light.distance = cfg.distance;
+          }
+          if (cfg.decay !== undefined) {
+            torch.light.decay = cfg.decay;
+          }
+          const intensity = cfg.intensity ?? 3.2;
+          torch.baseIntensity = intensity;
+          torch.light.intensity = intensity;
+          torch.light.visible = intensity > 0;
+        } else {
+          torch.baseIntensity = 0;
+          torch.light.intensity = 0;
+          torch.light.visible = false;
+        }
+      }
+    }
   }
 
   private getAspect(): number {
@@ -130,10 +255,14 @@ export class SceneManager {
 
       // Subtle torchlight flicker
       for (const torch of this.torchLights) {
+        if (torch.baseIntensity <= 0) {
+          torch.light.intensity = 0;
+          continue;
+        }
         const flicker =
           Math.sin(this.elapsed * 7.5 + torch.phase) * 0.25 +
           Math.sin(this.elapsed * 13.1 + torch.phase * 2) * 0.12;
-        torch.light.intensity = torch.baseIntensity + flicker;
+        torch.light.intensity = Math.max(0, torch.baseIntensity + flicker);
       }
 
       this.cameraController.update(dt);

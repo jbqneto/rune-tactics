@@ -58,6 +58,7 @@ export class TurnSystem {
       unit.hasAttacked = false;
       unit.hasActivatedThisRound = false;
       unit.skillCooldown = 0;
+      unit.isGuarding = false;
     }
 
     const firstIndex = this.turnOrder.findIndex((id) => units.find((u) => u.id === id)?.alive);
@@ -123,6 +124,7 @@ export class TurnSystem {
 
     this.turnIndex = nextIdx;
     const nextUnit = units.find((u) => u.id === this.turnOrder[nextIdx])!;
+    nextUnit.isGuarding = false;
     this.activeUnitId = nextUnit.id;
     this.turnState = nextUnit.team === 'player' ? 'player_unit_active' : 'enemy_activation';
 

@@ -1,11 +1,14 @@
 import { GRID_SIZE, INITIAL_UNITS, MAPS, OBSTACLES, type MapConfig, type UnitSpawn } from '../config/gameConfig';
 import type {
   ActionResult,
+  CampaignHeroProgress,
   GameEvent,
+  GameMode,
   GameStateSnapshot,
   GridCoord,
   IGameEngine,
   ObstacleDef,
+  PendingAttack,
   SmartActionPlan,
   UnitState,
 } from '../shared/types';
@@ -18,6 +21,8 @@ import {
   getSkillTargetCells,
   isValidSkillTarget,
   resolveAttack,
+  resolveDefend,
+  resolvePendingAttack,
   resolveSkill,
 } from './combat/CombatSystem';
 import { createUnits } from './entities/UnitFactory';
@@ -33,6 +38,10 @@ export interface GameSetup {
   seed?: number;
   mapId?: string;
   randomizeSpawns?: boolean;
+  mode?: GameMode;
+  stageNumber?: number;
+  stageName?: string;
+  heroOverrides?: CampaignHeroProgress[];
 }
 
 interface UndoSnapshot {
@@ -43,7 +52,15 @@ interface UndoSnapshot {
 
 const OK: ActionResult = { ok: true };
 const fail = (reason: string): ActionResult => ({ ok: false, reason });
-const copyUnit = (unit: UnitState): UnitState => ({ ...unit, pos: { ...unit.pos } });
+const copyUnit = (unit: UnitState): UnitState => ({
+  ...unit,
+  pos: { ...unit.pos },
+  attributes: { ...unit.attributes },
+});
+const copyPendingAttack = (pending: PendingAttack): PendingAttack => ({
+  ...pending,
+  targetCells: pending.targetCells.map((c) => ({ ...c })),
+});
 
 export class GameEngine implements IGameEngine {
   private readonly setup: GameSetup;
@@ -52,6 +69,8 @@ export class GameEngine implements IGameEngine {
   private units: UnitState[] = [];
   private selectedUnitId: string | null = null;
   private events: GameEvent[] = [];
+  private pendingAttacks: PendingAttack[] = [];
+  private pendingAttackCounter = 0;
   private undoSnapshot: UndoSnapshot | null = null;
 
   private currentMapId = 'ruins';
@@ -67,6 +86,9 @@ export class GameEngine implements IGameEngine {
 
   getState(): GameStateSnapshot {
     return {
+      mode: this.setup.mode ?? 'quick-battle',
+      ...(this.setup.stageNumber !== undefined ? { stageNumber: this.setup.stageNumber } : {}),
+      ...(this.setup.stageName !== undefined ? { stageName: this.setup.stageName } : {}),
       mapId: this.currentMapId,
       mapName: this.currentMapName,
       seed: this.currentSeed,
@@ -84,6 +106,7 @@ export class GameEngine implements IGameEngine {
       activationTeam: this.turns.activationTeam,
       selectedUnitId: this.selectedUnitId,
       canUndoMove: this.canUndoMoveNow(),
+      pendingAttacks: this.pendingAttacks.map(copyPendingAttack),
       winner: this.turns.winner,
     };
   }
@@ -229,7 +252,7 @@ export class GameEngine implements IGameEngine {
     if (!canAttack(unit, target, this.grid)) return fail('Sem linha de visão até o alvo.');
 
     this.undoSnapshot = null;
-    this.events.push(...resolveAttack(unit, target));
+    this.pushCombatEvents(resolveAttack(unit, target));
     this.postActionCheck(unit);
     return OK;
   }
@@ -246,7 +269,18 @@ export class GameEngine implements IGameEngine {
     }
 
     this.undoSnapshot = null;
-    this.events.push(...resolveSkill(unit, skill, targetCell, this.units, this.grid));
+    this.pushCombatEvents(resolveSkill(unit, skill, targetCell, this.units, this.grid));
+    this.postActionCheck(unit);
+    return OK;
+  }
+
+  defend(): ActionResult {
+    const unit = this.activePlayerUnit();
+    if (typeof unit === 'string') return fail(unit);
+    if (unit.hasAttacked) return fail('A unidade já agiu nesta ativação.');
+
+    this.undoSnapshot = null;
+    this.events.push(...resolveDefend(unit));
     this.postActionCheck(unit);
     return OK;
   }
@@ -304,7 +338,7 @@ export class GameEngine implements IGameEngine {
       this.events.push({ type: 'unitMoved', unitId: unit.id, path: plan.path });
     }
 
-    this.events.push(...resolveAttack(unit, target));
+    this.pushCombatEvents(resolveAttack(unit, target));
     this.postActionCheck(unit);
     return OK;
   }
@@ -363,7 +397,7 @@ export class GameEngine implements IGameEngine {
       this.events.push({ type: 'unitMoved', unitId: unit.id, path: plan.path });
     }
 
-    this.events.push(...resolveSkill(unit, skill, targetCell, this.units, this.grid));
+    this.pushCombatEvents(resolveSkill(unit, skill, targetCell, this.units, this.grid));
     this.postActionCheck(unit);
     return OK;
   }
@@ -373,8 +407,7 @@ export class GameEngine implements IGameEngine {
     if (typeof unit === 'string') return fail(unit);
 
     this.undoSnapshot = null;
-    this.events.push(...this.turns.advanceTurn(unit, this.units));
-    this.syncSelection();
+    this.advanceAndResolvePending(unit);
     return OK;
   }
 
@@ -386,13 +419,36 @@ export class GameEngine implements IGameEngine {
 
     const action = nextEnemyAction(enemy, this.units, this.grid);
     if (!action) {
-      this.events.push(...this.turns.advanceTurn(enemy, this.units));
-      this.syncSelection();
+      this.advanceAndResolvePending(enemy);
       return false;
     }
 
     if (action.type === 'attack') {
-      this.events.push(...resolveAttack(enemy, action.target));
+      this.pushCombatEvents(resolveAttack(enemy, action.target));
+    } else if (action.type === 'defend') {
+      this.events.push(...resolveDefend(enemy));
+    } else if (action.type === 'skill') {
+      const skill = getSkill(enemy);
+      if (!skill || !isValidSkillTarget(enemy, skill, action.targetCell, this.units, this.grid)) {
+        this.advanceAndResolvePending(enemy);
+        return false;
+      }
+      this.pushCombatEvents(resolveSkill(enemy, skill, action.targetCell, this.units, this.grid));
+    } else if (action.type === 'prepareAttack') {
+      enemy.hasAttacked = true;
+      enemy.skillCooldown = action.cooldown;
+      this.pendingAttackCounter += 1;
+      const pending: PendingAttack = {
+        id: `${enemy.id}-pending-${this.turns.round}-${this.pendingAttackCounter}`,
+        casterId: enemy.id,
+        skillName: action.skillName,
+        targetCells: action.targetCells.map((c) => ({ x: c.x, y: c.y })),
+        basePower: action.basePower,
+        attackKind: action.attackKind,
+        preparedRound: this.turns.round,
+      };
+      this.pendingAttacks.push(pending);
+      this.events.push({ type: 'attackPrepared', pendingAttack: copyPendingAttack(pending) });
     } else {
       enemy.pos = { ...action.path[action.path.length - 1] };
       enemy.hasMoved = true;
@@ -465,9 +521,11 @@ export class GameEngine implements IGameEngine {
         )
       : baseSpawns;
 
-    this.units = createUnits(resolvedSpawns);
+    this.units = createUnits(resolvedSpawns, this.setup.heroOverrides);
     this.turns.reset(this.units);
     this.events = [];
+    this.pendingAttacks = [];
+    this.pendingAttackCounter = 0;
     this.undoSnapshot = null;
     this.syncSelection();
   }
@@ -509,6 +567,54 @@ export class GameEngine implements IGameEngine {
     return unit;
   }
 
+  private pushCombatEvents(newEvents: GameEvent[]): void {
+    for (const ev of newEvents) {
+      this.events.push(ev);
+      if (ev.type === 'unitDied') {
+        const cancelled = this.pendingAttacks.filter((p) => p.casterId === ev.unitId);
+        if (cancelled.length > 0) {
+          this.pendingAttacks = this.pendingAttacks.filter((p) => p.casterId !== ev.unitId);
+          for (const pending of cancelled) {
+            this.events.push({
+              type: 'attackCancelled',
+              pendingAttackId: pending.id,
+              casterId: pending.casterId,
+              reason: 'caster_died',
+            });
+          }
+        }
+      }
+    }
+  }
+
+  private advanceAndResolvePending(activeUnit: UnitState): void {
+    this.events.push(...this.turns.advanceTurn(activeUnit, this.units));
+    this.syncSelection();
+    this.resolvePendingForActiveUnit();
+  }
+
+  private resolvePendingForActiveUnit(): void {
+    if (this.turns.isOver || !this.turns.activeUnitId) return;
+    const activeId = this.turns.activeUnitId;
+    const pendingForUnit = this.pendingAttacks.filter((p) => p.casterId === activeId);
+    if (pendingForUnit.length === 0) return;
+
+    this.pendingAttacks = this.pendingAttacks.filter((p) => p.casterId !== activeId);
+    const caster = this.findUnit(activeId);
+    if (!caster || !caster.alive) return;
+
+    for (const pending of pendingForUnit) {
+      this.pushCombatEvents(resolvePendingAttack(pending, caster, this.units));
+    }
+
+    const battleEvents = this.turns.checkBattleEnd(this.units);
+    if (this.turns.isOver) {
+      this.events.push(...battleEvents);
+      this.undoSnapshot = null;
+      this.selectedUnitId = null;
+    }
+  }
+
   private postActionCheck(activeUnit: UnitState): void {
     const battleEvents = this.turns.checkBattleEnd(this.units);
     if (this.turns.isOver) {
@@ -520,8 +626,7 @@ export class GameEngine implements IGameEngine {
 
     if (!activeUnit.alive || (activeUnit.hasMoved && activeUnit.hasAttacked)) {
       this.undoSnapshot = null;
-      this.events.push(...this.turns.advanceTurn(activeUnit, this.units));
-      this.syncSelection();
+      this.advanceAndResolvePending(activeUnit);
     }
   }
 }

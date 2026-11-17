@@ -30,6 +30,30 @@ const MODEL_SPECS: Record<UnitType, ModelSpec> = {
     tintHex: 0x6b8e23,
     tintStrength: 0.55,
   },
+  'goblin-stalker': {
+    path: '/assets/models/Rogue_Hooded.glb',
+    targetHeight: 0.85,
+    tintHex: 0x365314,
+    tintStrength: 0.58,
+  },
+  'skeleton-shieldbearer': {
+    path: '/assets/models/Skeleton_Warrior.glb',
+    targetHeight: 1.06,
+    tintHex: 0x94a3b8,
+    tintStrength: 0.35,
+  },
+  'necromancer-acolyte': {
+    path: '/assets/models/Skeleton_Mage.glb',
+    targetHeight: 0.98,
+    tintHex: 0x10b981,
+    tintStrength: 0.42,
+  },
+  'ashen-guardian': {
+    path: '/assets/models/Skeleton_Warrior.glb',
+    targetHeight: 1.42,
+    tintHex: 0x7f1d1d,
+    tintStrength: 0.45,
+  },
 };
 
 const gltfLoader = new GLTFLoader();

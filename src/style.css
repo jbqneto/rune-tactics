@@ -680,6 +680,8 @@ body {
   display: flex;
   flex-direction: column;
   gap: 5px;
+  max-height: 290px;
+  overflow-y: auto;
 }
 
 .hud-enemy-item {
@@ -873,7 +875,8 @@ body {
 
 .hud-unit-stats {
   display: flex;
-  gap: var(--space-3);
+  gap: 10px;
+  white-space: nowrap;
 }
 
 .hud-unit-stats div {
@@ -882,15 +885,15 @@ body {
 }
 
 .hud-unit-stats span {
-  font-size: var(--text-label-size);
-  line-height: var(--text-label-lh);
+  font-size: 10px;
+  line-height: 1.2;
   color: var(--color-text-muted);
 }
 
 .hud-unit-stats strong {
   font-family: var(--font-display);
-  font-size: var(--text-heading-size);
-  line-height: var(--text-heading-lh);
+  font-size: 14px;
+  line-height: 1.2;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   color: var(--color-text);
@@ -1278,4 +1281,432 @@ body {
   .hud-viewport-warning {
     display: flex;
   }
+}
+
+.hud-action-btn--defend {
+  border-color: rgba(56, 189, 248, 0.35);
+}
+
+.hud-action-btn--defend:hover:not(:disabled) {
+  border-color: rgba(56, 189, 248, 0.78);
+  box-shadow: 0 0 14px rgba(56, 189, 248, 0.22);
+}
+
+.unit-shield-badge {
+  margin-left: 4px;
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: rgba(14, 165, 233, 0.9);
+  border: 1px solid rgba(186, 230, 253, 0.8);
+  color: #f0f9ff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.unit-shield-badge.hidden {
+  display: none;
+}
+
+.hud-unit-shield strong {
+  color: #38bdf8;
+}
+
+@keyframes floatCombatText {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -20%) scale(0.85);
+  }
+  18% {
+    opacity: 1;
+    transform: translate(-50%, -55%) scale(1.06);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -185%) scale(0.95);
+  }
+}
+
+.floating-combat-text {
+  position: absolute;
+  pointer-events: none;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  text-shadow: 0 2px 6px rgba(0, 0, 0, 0.9), 0 0 2px rgba(0, 0, 0, 0.95);
+  white-space: nowrap;
+  z-index: 30;
+  animation: floatCombatText 0.95s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+.floating-combat-text--damage {
+  color: #f87171;
+}
+
+.floating-combat-text--heal {
+  color: #4ade80;
+}
+
+.floating-combat-text--shield {
+  color: #38bdf8;
+}
+
+.hud-countdown-banner {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  width: 100%;
+  padding: 8px 12px;
+  background: rgba(15, 23, 42, 0.88);
+  border: 1px solid rgba(250, 204, 21, 0.35);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+
+.hud-countdown-banner.hidden {
+  display: none;
+}
+
+.hud-countdown-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.hud-countdown-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #cbd5e1;
+}
+
+.hud-countdown-value {
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  color: #facc15;
+  line-height: 1;
+}
+
+.hud-countdown-track {
+  width: 100%;
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(51, 65, 85, 0.75);
+  overflow: hidden;
+}
+
+.hud-countdown-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #3b82f6, #facc15);
+  transition: width 0.25s linear, background-color 0.2s ease;
+}
+
+.hud-countdown-banner.is-warning {
+  border-color: rgba(251, 146, 60, 0.65);
+}
+
+.hud-countdown-banner.is-warning .hud-countdown-value {
+  color: #fb923c;
+}
+
+.hud-countdown-banner.is-warning .hud-countdown-fill {
+  background: #fb923c;
+}
+
+.hud-countdown-banner.is-critical {
+  border-color: rgba(239, 68, 68, 0.85);
+}
+
+.hud-countdown-banner.is-critical .hud-countdown-value {
+  color: #ef4444;
+}
+
+.hud-countdown-banner.is-critical .hud-countdown-fill {
+  background: #ef4444;
+}
+
+
+/* ==========================================================================
+   V4 — Campanha, Atributos, Menu Inicial e Acampamento
+   ========================================================================== */
+
+.hud-turn-card-actions {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.hud-turn-card-actions .hud-btn {
+  flex: 1;
+}
+
+.hud-unit-attrs {
+  display: flex;
+  gap: var(--space-3);
+  margin-top: 2px;
+  font-size: var(--text-caption-size);
+  line-height: var(--text-caption-lh);
+  color: var(--color-text-muted);
+}
+
+.hud-unit-attrs strong {
+  color: var(--color-text);
+  font-variant-numeric: tabular-nums;
+}
+
+.hud-unit-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.hud-unit-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  font-size: var(--text-caption-size);
+  font-weight: 600;
+  border: 1px solid transparent;
+}
+
+.hud-unit-badge--guard {
+  background: rgba(59, 130, 246, 0.2);
+  border-color: rgba(96, 165, 250, 0.45);
+  color: #93c5fd;
+}
+
+.hud-unit-badge--boss {
+  background: rgba(239, 68, 68, 0.22);
+  border-color: rgba(248, 113, 113, 0.55);
+  color: #fca5a5;
+}
+
+.hud-menu-modal {
+  max-width: 460px;
+  width: 92vw;
+}
+
+.hud-menu-badge {
+  display: inline-block;
+  margin-bottom: var(--space-2);
+  padding: 3px 10px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--color-border-strong);
+  background: rgba(203, 166, 98, 0.14);
+  color: var(--color-gold-soft);
+  font-size: var(--text-caption-size);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.hud-menu-title {
+  color: var(--color-text);
+}
+
+.hud-menu-actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.hud-menu-btn {
+  height: auto;
+  padding: var(--space-3) var(--space-4);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  text-align: left;
+  gap: 2px;
+}
+
+.hud-menu-btn:disabled {
+  opacity: 0.48;
+  cursor: not-allowed;
+}
+
+.hud-menu-btn-title {
+  font-size: var(--text-heading-size);
+  font-weight: 700;
+}
+
+.hud-menu-btn-desc {
+  font-size: var(--text-label-size);
+  font-weight: 400;
+  color: rgba(248, 250, 252, 0.8);
+}
+
+.hud-modal-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--space-3);
+}
+
+/* Tela de Acampamento & Evolução */
+.hud-camp-modal {
+  max-width: 860px;
+  width: 94vw;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+
+.hud-camp-heroes {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+  text-align: left;
+}
+
+.hud-camp-hero {
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.hud-camp-hero-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.hud-camp-portrait {
+  width: 48px;
+  height: 48px;
+  border-radius: var(--radius-md);
+  object-fit: cover;
+  border: 2px solid var(--color-border);
+}
+
+.hud-camp-hero-meta {
+  flex: 1;
+  min-width: 0;
+}
+
+.hud-camp-hero-title-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: 4px;
+}
+
+.hud-camp-hero-name {
+  font-family: var(--font-display);
+  font-size: var(--text-heading-size);
+  color: var(--color-text);
+}
+
+.hud-camp-points {
+  font-size: var(--text-caption-size);
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  background: rgba(100, 116, 139, 0.3);
+  color: var(--color-text-muted);
+}
+
+.hud-camp-points.has-points {
+  background: rgba(250, 204, 21, 0.22);
+  color: var(--color-gold);
+  border: 1px solid rgba(250, 204, 21, 0.5);
+}
+
+.hud-camp-hp-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.hud-camp-hp-val {
+  font-size: var(--text-caption-size);
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.hud-camp-attrs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2);
+}
+
+.hud-camp-attr-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  background: rgba(15, 23, 42, 0.65);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+}
+
+.hud-camp-attr-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.hud-camp-attr-name {
+  font-size: var(--text-caption-size);
+  color: var(--color-text-muted);
+}
+
+.hud-camp-attr-val {
+  font-family: var(--font-display);
+  font-size: var(--text-heading-size);
+  color: var(--color-text);
+  line-height: 1.2;
+}
+
+.hud-camp-attr-preview {
+  font-size: 10px;
+  color: var(--color-gold-soft);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.hud-camp-plus-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border-strong);
+  background: var(--color-player);
+  color: var(--color-text);
+  font-weight: 700;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.hud-camp-plus-btn:hover:not(:disabled) {
+  background: var(--color-player-soft);
+}
+
+.hud-camp-plus-btn:disabled {
+  background: rgba(51, 65, 85, 0.5);
+  border-color: rgba(148, 163, 184, 0.2);
+  color: var(--color-text-disabled);
+  cursor: not-allowed;
+}
+
+.hud-camp-hint {
+  margin: 0 0 var(--space-4);
+  font-size: var(--text-label-size);
+  color: var(--color-text-muted);
 }

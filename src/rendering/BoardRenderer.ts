@@ -1,5 +1,15 @@
 import * as THREE from 'three';
-import type { GridCoord, ObstacleDef } from '../shared/types';
+import type { GridCoord, MapConfig, ObstacleDef } from '../shared/types';
+import { computeOccludedIds, type OcclusionItem } from './scenarioOcclusion';
+import type { SceneAtmosphereConfig } from './SceneManager';
+import { buildFortressScenario } from './scenarios/FortressScenario';
+import type {
+  ObstacleRayUserData,
+  ScenarioBuildOptions,
+  ScenarioBuildResult,
+  TileRayUserData,
+} from './scenarios/ScenarioTypes';
+import { buildSwampScenario } from './scenarios/SwampScenario';
 
 export interface BoardHighlights {
   reachable: GridCoord[];
@@ -9,8 +19,15 @@ export interface BoardHighlights {
   skillTargets: GridCoord[];
   skillArea: GridCoord[];
   skillMode?: 'enemy' | 'ally';
+  dangerCells?: GridCoord[];
   hoverCell: GridCoord | null;
   path: GridCoord[] | null;
+}
+
+export interface BuildBoardOptions {
+  mapId?: string;
+  theme?: MapConfig['theme'];
+  bridgeCells?: GridCoord[];
 }
 
 const GRID_HIGHLIGHTS = {
@@ -33,6 +50,9 @@ export class BoardRenderer {
   private gridSize = 8;
   private tileMeshes: THREE.Mesh[] = [];
   private obstacleMeshes: THREE.Mesh[] = [];
+  private activeScenario: ScenarioBuildResult | null = null;
+  private occlusionItems: OcclusionItem[] = [];
+  private elapsed = 0;
   private readonly highlightGroup = new THREE.Group();
   private readonly pathGroup = new THREE.Group();
 
@@ -111,6 +131,20 @@ export class BoardRenderer {
     opacity: 0.78,
     depthWrite: false,
   });
+  private readonly dangerMat = new THREE.MeshBasicMaterial({
+    color: 0xef4444,
+    transparent: true,
+    opacity: 0.42,
+    depthWrite: false,
+  });
+  private readonly dangerAmberMat = new THREE.MeshBasicMaterial({
+    color: 0xf97316,
+    transparent: true,
+    opacity: 0.78,
+    side: THREE.DoubleSide,
+    depthWrite: false,
+  });
+  private readonly dangerRingGeo = new THREE.RingGeometry(0.32, 0.44, 4);
   private readonly pathMat = new THREE.MeshBasicMaterial({
     color: 0xfacc15,
     depthWrite: false,
@@ -162,25 +196,71 @@ export class BoardRenderer {
     );
   }
 
-  buildBoard(gridSize: number, obstacleDefs: ObstacleDef[], mapId = 'ruins'): void {
-    this.gridSize = gridSize;
+  buildBoard(
+    gridSize: number,
+    obstacleDefs: ObstacleDef[],
+    mapIdOrOptions: string | BuildBoardOptions = 'ruins'
+  ): void {
+    const options: BuildBoardOptions =
+      typeof mapIdOrOptions === 'string' ? { mapId: mapIdOrOptions } : mapIdOrOptions;
+    const theme = options.theme;
+    const mapId = options.mapId ?? theme ?? 'ruins';
+    const bridgeCells = options.bridgeCells ?? [];
 
-    for (let i = this.group.children.length - 1; i >= 0; i--) {
-      const child = this.group.children[i];
-      if (child !== this.highlightGroup && child !== this.pathGroup) {
-        this.group.remove(child);
-      }
-    }
+    this.gridSize = gridSize;
+    this.elapsed = 0;
+    this.clearActiveScenario();
+    this.disposeBoardChildren();
     this.tileMeshes = [];
     this.obstacleMeshes = [];
+
+    if (mapId === 'forgotten-swamp' || mapId === 'fortress') {
+      const scenarioOptions: ScenarioBuildOptions = {
+        mapId,
+        gridSize,
+        obstacleDefs,
+        theme,
+        bridgeCells,
+      };
+      const scenario =
+        mapId === 'forgotten-swamp'
+          ? buildSwampScenario(scenarioOptions)
+          : buildFortressScenario(scenarioOptions);
+
+      this.activeScenario = scenario;
+      this.group.add(scenario.group);
+      this.tileMeshes.push(...scenario.tileMeshes);
+      this.obstacleMeshes.push(...scenario.obstacleMeshes);
+      this.occlusionItems = scenario.occluders.map((occ) => ({
+        id: occ.id,
+        centerX: (occ.bounds.minX + occ.bounds.maxX) / 2,
+        centerZ: (occ.bounds.minZ + occ.bounds.maxZ) / 2,
+        halfWidth: (occ.bounds.maxX - occ.bounds.minX) / 2,
+        halfDepth: (occ.bounds.maxZ - occ.bounds.minZ) / 2,
+        height: occ.bounds.maxY,
+        category: occ.bounds.maxY >= 2.2 ? 'tall' : 'mid',
+      }));
+      return;
+    }
+
+    const isFortress = mapId === 'fortress' || theme === 'fortress';
+    const isSanctuary = mapId === 'sanctuary' || theme === 'sanctuary';
+    const isSwamp = mapId === 'swamp' || theme === 'swamp';
 
     // Plinto/base de diorama em camadas estilo FFT (y < 0, fora das células jogáveis)
     const upperWidth = gridSize * CELL_SIZE + 0.65;
     const upperHeight = 0.38;
+    const upperColor = isSanctuary
+      ? 0x1c1418
+      : isFortress
+        ? 0x293548
+        : isSwamp
+          ? 0x1f2d24
+          : 0x334155;
     const upperMat = new THREE.MeshStandardMaterial({
-      color: mapId === 'fortress' ? 0x293548 : 0x334155,
+      color: upperColor,
       roughness: 0.9,
-      metalness: 0.08,
+      metalness: isSanctuary ? 0.16 : 0.08,
     });
     const upperMesh = new THREE.Mesh(
       new THREE.BoxGeometry(upperWidth, upperHeight, upperWidth),
@@ -192,8 +272,15 @@ export class BoardRenderer {
 
     const midWidth = gridSize * CELL_SIZE + 1.4;
     const midHeight = 0.48;
+    const midColor = isSanctuary
+      ? 0x140d10
+      : isFortress
+        ? 0x1e293b
+        : isSwamp
+          ? 0x16221b
+          : 0x253042;
     const midMat = new THREE.MeshStandardMaterial({
-      color: mapId === 'fortress' ? 0x1e293b : 0x253042,
+      color: midColor,
       roughness: 0.94,
     });
     const midMesh = new THREE.Mesh(
@@ -207,7 +294,7 @@ export class BoardRenderer {
     const lowerWidth = gridSize * CELL_SIZE + 2.15;
     const lowerHeight = 0.65;
     const lowerMat = new THREE.MeshStandardMaterial({
-      color: 0x161f2e,
+      color: isSanctuary ? 0x0c0709 : 0x161f2e,
       roughness: 0.96,
     });
     const lowerMesh = new THREE.Mesh(
@@ -218,9 +305,11 @@ export class BoardRenderer {
     lowerMesh.receiveShadow = true;
     this.group.add(lowerMesh);
 
-    // Detalhes sutis de musgo verde nos degraus da borda externa do diorama
-    const dioramaMossMat = new THREE.MeshStandardMaterial({
-      color: 0x2d5a3c,
+    // Detalhes sutis nos degraus da borda externa do diorama
+    const dioramaEdgeMat = new THREE.MeshStandardMaterial({
+      color: isSanctuary ? 0x450a0a : 0x2d5a3c,
+      emissive: isSanctuary ? 0x7f1d1d : 0x000000,
+      emissiveIntensity: isSanctuary ? 0.35 : 0,
       roughness: 0.92,
     });
     const stepOffset = midWidth / 2 - 0.14;
@@ -235,48 +324,71 @@ export class BoardRenderer {
     for (const [mx, mz, mw, md] of mossEdgeCoords) {
       const strip = new THREE.Mesh(
         new THREE.BoxGeometry(mw, 0.07, md),
-        dioramaMossMat
+        dioramaEdgeMat
       );
       strip.position.set(mx, stepY, mz);
       strip.receiveShadow = true;
       this.group.add(strip);
     }
 
+    const waterKeys = new Set(
+      obstacleDefs.filter((o) => o.kind === 'water').map((o) => coordKey(o.pos))
+    );
+
     // Stone floor tiles
     for (let y = 0; y < gridSize; y++) {
       for (let x = 0; x < gridSize; x++) {
         const isLight = (x + y) % 2 === 0;
+        const isWater = waterKeys.has(coordKey({ x, y }));
         const tile = new THREE.Mesh(
           this.tileGeo,
           isLight ? this.tileMatLight : this.tileMatDark
         );
-        tile.position.copy(this.gridToWorld({ x, y }, -TILE_HEIGHT / 2));
+        const yPos = isWater ? -TILE_HEIGHT / 2 - 0.08 : -TILE_HEIGHT / 2;
+        tile.position.copy(this.gridToWorld({ x, y }, yPos));
         tile.receiveShadow = true;
-        tile.userData = { gridCoord: { x, y } satisfies GridCoord };
+        tile.userData = {
+          kind: 'tile',
+          gridCoord: { x, y },
+        } satisfies TileRayUserData;
         this.group.add(tile);
         this.tileMeshes.push(tile);
       }
     }
 
-    // Perímetro decorativo conforme o mapa
-    this.buildPerimeterScenery(gridSize, mapId);
+    // Perímetro decorativo conforme o mapa / tema
+    this.buildPerimeterScenery(gridSize, mapId, theme);
 
     // Internal obstacles by kind
     for (const obs of obstacleDefs) {
       this.buildObstacle(obs);
     }
+
+    // Pontes visuais sobre água/pântano
+    for (const cell of bridgeCells) {
+      this.buildBridgeCell(cell);
+    }
   }
 
-  private buildPerimeterScenery(gridSize: number, mapId: string): void {
+  private buildPerimeterScenery(
+    gridSize: number,
+    mapId: string,
+    theme?: MapConfig['theme']
+  ): void {
     const half = gridSize / 2;
     const outerRadius = half + 0.95;
     const corner = half + 0.65;
     const mossEdge = half + 0.55;
 
+    const isSanctuary = mapId === 'sanctuary' || theme === 'sanctuary';
+    const isFortress = mapId === 'fortress' || theme === 'fortress';
+    const isSwamp = mapId === 'swamp' || theme === 'swamp';
+    const isCatacombs = mapId === 'catacombs' || theme === 'catacombs';
+
     // Outer courtyard stone rim
     const rimGeo = new THREE.BoxGeometry(gridSize + 2.7, 0.28, gridSize + 2.7);
     const rimMat = new THREE.MeshStandardMaterial({
-      color: 0x1e293b,
+      color: isSanctuary ? 0x181115 : isSwamp ? 0x18261e : 0x1e293b,
       roughness: 0.95,
     });
     const rim = new THREE.Mesh(rimGeo, rimMat);
@@ -292,31 +404,102 @@ export class BoardRenderer {
       [corner, corner],
     ];
     const brazierMat = new THREE.MeshStandardMaterial({
-      color: mapId === 'fortress' ? 0x27272a : 0x475569,
+      color: isSanctuary ? 0x1c1917 : isFortress ? 0x27272a : 0x475569,
       roughness: 0.6,
-      metalness: mapId === 'fortress' ? 0.5 : 0.1,
+      metalness: isFortress || isSanctuary ? 0.5 : 0.1,
     });
-    const flameMat = new THREE.MeshBasicMaterial({ color: 0xfb923c });
+    const flameColor = isSanctuary ? 0xef4444 : isCatacombs ? 0x10b981 : 0xfb923c;
+    const flameMat = new THREE.MeshBasicMaterial({ color: flameColor });
 
     for (const [tx, tz] of torchCoords) {
       const post = new THREE.Mesh(
-        new THREE.BoxGeometry(0.42, mapId === 'fortress' ? 1.15 : 1.35, 0.42),
-        mapId === 'fortress' ? brazierMat : this.wallMat
+        new THREE.BoxGeometry(0.42, isFortress || isSanctuary ? 1.15 : 1.35, 0.42),
+        isFortress || isSanctuary ? brazierMat : this.wallMat
       );
       post.position.set(tx, 0.45, tz);
       post.castShadow = true;
       post.receiveShadow = true;
 
       const bowl = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.16, 0.25, 6), brazierMat);
-      bowl.position.set(tx, mapId === 'fortress' ? 1.12 : 1.25, tz);
+      bowl.position.set(tx, isFortress || isSanctuary ? 1.12 : 1.25, tz);
 
       const flame = new THREE.Mesh(new THREE.ConeGeometry(0.18, 0.42, 6), flameMat);
-      flame.position.set(tx, mapId === 'fortress' ? 1.42 : 1.54, tz);
+      flame.position.set(tx, isFortress || isSanctuary ? 1.42 : 1.54, tz);
 
       this.group.add(post, bowl, flame);
     }
 
-    if (mapId === 'fortress') {
+    if (isSanctuary) {
+      // Santuário Corrompido: obeliscos sombrios, brasas incandescentes e estandartes carmim
+      const obsidianMat = new THREE.MeshStandardMaterial({
+        color: 0x1c1917,
+        roughness: 0.75,
+        metalness: 0.25,
+      });
+      const emberMat = new THREE.MeshStandardMaterial({
+        color: 0xf97316,
+        emissive: 0xdc2626,
+        emissiveIntensity: 0.85,
+        roughness: 0.35,
+      });
+      const obeliskPositions: [number, number, number][] = [
+        [-half * 0.5, -outerRadius, 2.0],
+        [half * 0.5, -outerRadius, 2.0],
+        [-outerRadius, -half * 0.45, 1.7],
+        [outerRadius, -half * 0.45, 1.7],
+      ];
+      for (const [ox, oz, oh] of obeliskPositions) {
+        const obelisk = new THREE.Mesh(new THREE.BoxGeometry(0.54, oh, 0.54), obsidianMat);
+        obelisk.position.set(ox, oh / 2 - 0.15, oz);
+        obelisk.castShadow = true;
+        obelisk.receiveShadow = true;
+
+        const runeCore = new THREE.Mesh(new THREE.OctahedronGeometry(0.18, 0), emberMat);
+        runeCore.position.set(ox, oh + 0.08, oz);
+        this.group.add(obelisk, runeCore);
+      }
+
+      // Brasas espalhadas pela borda do santuário
+      const emberSpots: [number, number][] = [
+        [-mossEdge, -half * 0.2],
+        [-mossEdge, half * 0.55],
+        [-half * 0.25, -mossEdge - 0.15],
+        [half * 0.25, -mossEdge - 0.15],
+        [mossEdge + 0.12, half * 0.3],
+        [-half * 0.45, mossEdge + 0.12],
+      ];
+      for (const [ex, ez] of emberSpots) {
+        const cinder = new THREE.Mesh(new THREE.DodecahedronGeometry(0.16, 0), emberMat);
+        cinder.scale.set(1.25, 0.45, 1.15);
+        cinder.position.set(ex, 0.02, ez);
+        this.group.add(cinder);
+      }
+      return;
+    }
+
+    if (isSwamp) {
+      const mossMat = new THREE.MeshStandardMaterial({ color: 0x2d5a3c, roughness: 0.92 });
+      const reedMat = new THREE.MeshStandardMaterial({ color: 0x3f6212, roughness: 0.9 });
+      const swampSpots: [number, number][] = [
+        [-mossEdge, -half * 0.65],
+        [-mossEdge, half * 0.4],
+        [-half * 0.3, -mossEdge - 0.1],
+        [half * 0.4, -mossEdge - 0.1],
+        [mossEdge + 0.1, -half * 0.25],
+        [half * 0.5, mossEdge + 0.1],
+      ];
+      for (const [sx, sz] of swampSpots) {
+        const tuft = new THREE.Mesh(new THREE.DodecahedronGeometry(0.24, 0), mossMat);
+        tuft.scale.set(1.4, 0.55, 1.3);
+        tuft.position.set(sx, 0.03, sz);
+        const reed = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.04, 0.65, 5), reedMat);
+        reed.position.set(sx + 0.08, 0.3, sz - 0.06);
+        this.group.add(tuft, reed);
+      }
+      return;
+    }
+
+    if (isFortress) {
       // Ameias/muros fortificados na borda + estandartes escuros
       const wallSegments: { x: number; y: number; z: number; w: number; h: number; d: number }[] = [
         { x: -half * 0.45, y: 0.95, z: -outerRadius, w: gridSize * 0.45, h: 1.9, d: 0.55 },
@@ -442,6 +625,7 @@ export class BoardRenderer {
   private buildObstacle(obs: ObstacleDef): void {
     const group = new THREE.Group();
     group.position.copy(this.gridToWorld(obs.pos, 0));
+    const solidMeshes: THREE.Mesh[] = [];
 
     if (obs.kind === 'pillar') {
       const base = new THREE.Mesh(new THREE.BoxGeometry(0.84, 0.18, 0.84), this.wallMat);
@@ -460,7 +644,7 @@ export class BoardRenderer {
       cap.receiveShadow = true;
 
       group.add(base, col, cap);
-      this.obstacleMeshes.push(base, col, cap);
+      solidMeshes.push(base, col, cap);
     } else if (obs.kind === 'wall') {
       const body = new THREE.Mesh(new THREE.BoxGeometry(0.88, 0.64, 0.84), this.wallMat);
       body.position.y = 0.32;
@@ -473,7 +657,7 @@ export class BoardRenderer {
       cap.receiveShadow = true;
 
       group.add(body, cap);
-      this.obstacleMeshes.push(body, cap);
+      solidMeshes.push(body, cap);
     } else if (obs.kind === 'crate') {
       const woodMat = new THREE.MeshStandardMaterial({ color: 0x8b5a2b, roughness: 0.85 });
       const trimMat = new THREE.MeshStandardMaterial({ color: 0x5c3a1b, roughness: 0.9 });
@@ -488,7 +672,24 @@ export class BoardRenderer {
       frame.castShadow = true;
 
       group.add(box, frame);
-      this.obstacleMeshes.push(box, frame);
+      solidMeshes.push(box, frame);
+    } else if (obs.kind === 'water') {
+      const waterMat = new THREE.MeshStandardMaterial({
+        color: 0x1e4d3b,
+        emissive: 0x0f2920,
+        emissiveIntensity: 0.25,
+        roughness: 0.16,
+        metalness: 0.1,
+        transparent: true,
+        opacity: 0.78,
+      });
+      const waterPlane = new THREE.Mesh(new THREE.PlaneGeometry(0.96, 0.96), waterMat);
+      waterPlane.rotation.x = -Math.PI / 2;
+      waterPlane.position.y = -0.035;
+      waterPlane.receiveShadow = true;
+      waterPlane.userData = { gridCoord: obs.pos, obstacleKind: 'water' };
+      group.add(waterPlane);
+      // Não entra em obstacleMeshes: água é rebaixada e não bloqueia LoS nem seleção atrás dela.
     } else {
       // barrel
       const woodMat = new THREE.MeshStandardMaterial({ color: 0x7c4d25, roughness: 0.82 });
@@ -509,8 +710,47 @@ export class BoardRenderer {
       bandBot.position.y = 0.16;
 
       group.add(body, bandTop, bandBot);
-      this.obstacleMeshes.push(body, bandTop, bandBot);
+      solidMeshes.push(body, bandTop, bandBot);
     }
+
+    if (solidMeshes.length > 0) {
+      const solidUserData: ObstacleRayUserData = {
+        kind: 'obstacle',
+        obstacleKind: obs.kind,
+        gridCoord: { x: obs.pos.x, y: obs.pos.y },
+      };
+      for (const mesh of solidMeshes) {
+        mesh.userData = solidUserData;
+        this.obstacleMeshes.push(mesh);
+      }
+    }
+
+    this.group.add(group);
+  }
+
+  private buildBridgeCell(coord: GridCoord): void {
+    const group = new THREE.Group();
+    group.position.copy(this.gridToWorld(coord, 0));
+
+    const plankMat = new THREE.MeshStandardMaterial({ color: 0x7c4d25, roughness: 0.86 });
+    const railMat = new THREE.MeshStandardMaterial({ color: 0x5c3a1b, roughness: 0.9 });
+
+    for (let i = -1; i <= 1; i++) {
+      const plank = new THREE.Mesh(new THREE.BoxGeometry(0.92, 0.05, 0.24), plankMat);
+      plank.position.set(0, -0.028, i * 0.3);
+      plank.receiveShadow = true;
+      plank.castShadow = true;
+      plank.userData = { gridCoord: coord, isBridge: true };
+      group.add(plank);
+    }
+
+    const leftRail = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.09, 0.94), railMat);
+    leftRail.position.set(-0.42, 0.017, 0);
+    leftRail.castShadow = true;
+    const rightRail = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.09, 0.94), railMat);
+    rightRail.position.set(0.42, 0.017, 0);
+    rightRail.castShadow = true;
+    group.add(leftRail, rightRail);
 
     this.group.add(group);
   }
@@ -521,6 +761,48 @@ export class BoardRenderer {
 
   getObstacleMeshes(): THREE.Object3D[] {
     return this.obstacleMeshes;
+  }
+
+  getAtmosphere(): SceneAtmosphereConfig | null {
+    const preset = this.activeScenario?.atmosphere;
+    if (!preset) return null;
+
+    return {
+      backgroundColor: preset.backgroundColor,
+      fogColor: preset.fogColor,
+      fogDensity: preset.fogDensity,
+      ambientColor: preset.ambientColor,
+      ambientIntensity: preset.ambientIntensity,
+      hemiSkyColor: preset.hemiSkyColor,
+      hemiGroundColor: preset.hemiGroundColor,
+      hemiIntensity: preset.hemiIntensity,
+      dirColor: preset.dirLightColor,
+      dirIntensity: preset.dirLightIntensity,
+      dirPosition: preset.dirLightPosition,
+      rimColor: preset.rimLightColor,
+      rimIntensity: preset.rimLightIntensity,
+      pointLights: preset.pointLights.map((pl) => ({
+        position: pl.position,
+        color: pl.color,
+        intensity: pl.intensity,
+        distance: pl.distance,
+        decay: pl.decay,
+      })),
+    };
+  }
+
+  update(dt: number, cameraAzimuthRad: number): void {
+    this.elapsed += dt;
+    if (!this.activeScenario) return;
+
+    this.activeScenario.update(dt, this.elapsed);
+
+    if (this.occlusionItems.length > 0) {
+      const occluded = computeOccludedIds(this.occlusionItems, cameraAzimuthRad);
+      for (const occluder of this.activeScenario.occluders) {
+        occluder.upperGroup.visible = !occluded.has(occluder.id);
+      }
+    }
   }
 
   setHighlights(highlights: BoardHighlights): void {
@@ -584,6 +866,16 @@ export class BoardRenderer {
       }
     }
 
+    for (const cell of highlights.dangerCells ?? []) {
+      this.addTileHighlight(cell, this.dangerMat, 0.015);
+      const warningFrame = new THREE.Mesh(this.dangerRingGeo, this.dangerAmberMat);
+      warningFrame.rotation.x = -Math.PI / 2;
+      warningFrame.rotation.z = Math.PI / 4;
+      warningFrame.position.copy(this.gridToWorld(cell, 0.017));
+      warningFrame.raycast = () => {};
+      this.highlightGroup.add(warningFrame);
+    }
+
     if (highlights.path && highlights.path.length >= 2) {
       this.renderPathPreview(highlights.path);
     }
@@ -636,5 +928,79 @@ export class BoardRenderer {
         child.geometry.dispose();
       }
     }
+  }
+
+  private disposeBoardChildren(): void {
+    const sharedGeos = new Set<THREE.BufferGeometry>([
+      this.tileGeo,
+      this.highlightGeo,
+      this.dangerRingGeo,
+    ]);
+    const sharedMats = new Set<THREE.Material>([
+      this.tileMatLight,
+      this.tileMatDark,
+      this.wallMat,
+    ]);
+    const disposedMats = new Set<THREE.Material>();
+
+    for (let i = this.group.children.length - 1; i >= 0; i--) {
+      const child = this.group.children[i];
+      if (child === this.highlightGroup || child === this.pathGroup) continue;
+      this.group.remove(child);
+      child.traverse((obj) => {
+        if (obj instanceof THREE.Mesh) {
+          if (obj.geometry && !sharedGeos.has(obj.geometry)) {
+            obj.geometry.dispose();
+          }
+          const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+          for (const m of mats) {
+            if (m && !sharedMats.has(m) && !disposedMats.has(m)) {
+              disposedMats.add(m);
+              m.dispose();
+            }
+          }
+        }
+      });
+    }
+  }
+
+  private clearActiveScenario(): void {
+    if (this.activeScenario) {
+      this.group.remove(this.activeScenario.group);
+      this.activeScenario.dispose();
+      this.activeScenario = null;
+    }
+    this.occlusionItems = [];
+  }
+
+  dispose(): void {
+    this.clearActiveScenario();
+    this.tileMeshes = [];
+    this.obstacleMeshes = [];
+    this.disposeBoardChildren();
+    this.clearGroup(this.highlightGroup, false);
+    this.clearGroup(this.pathGroup, true);
+    this.tileGeo.dispose();
+    this.highlightGeo.dispose();
+    this.dangerRingGeo.dispose();
+    this.tileMatLight.dispose();
+    this.tileMatDark.dispose();
+    this.wallMat.dispose();
+    this.floorTexture.dispose();
+    this.wallTexture.dispose();
+    this.reachableMat.dispose();
+    this.attackRangeMat.dispose();
+    this.healRangeMat.dispose();
+    this.attackableMat.dispose();
+    this.skillTargetMat.dispose();
+    this.skillAreaMat.dispose();
+    this.hoverMoveMat.dispose();
+    this.hoverAttackMat.dispose();
+    this.hoverSkillMat.dispose();
+    this.healTargetMat.dispose();
+    this.hoverHealMat.dispose();
+    this.dangerMat.dispose();
+    this.dangerAmberMat.dispose();
+    this.pathMat.dispose();
   }
 }

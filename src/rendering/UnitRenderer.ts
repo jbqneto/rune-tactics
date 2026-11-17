@@ -24,15 +24,20 @@ interface UnitVisual {
   weaponPivot: THREE.Group;
   weaponRestRotX: number;
   baseRing: THREE.Mesh;
+  shieldAura: THREE.Mesh;
+  bossEmberAura: THREE.Mesh | null;
   hitbox: THREE.Mesh;
   flashMaterials: THREE.MeshStandardMaterial[];
   unitMaterials: THREE.MeshStandardMaterial[];
   hpBarEl: HTMLDivElement;
   hpFillEl: HTMLDivElement;
   hpTextEl: HTMLSpanElement;
+  shieldBadgeEl: HTMLSpanElement;
   alive: boolean;
   hp: number;
   maxHp: number;
+  isGuarding: boolean;
+  bossPhase?: 1 | 2;
   facingYaw: number;
   targetYaw: number;
   lastOpacity: number;
@@ -52,6 +57,8 @@ type ActiveAnimation =
       kind: 'meleeAttack';
       attackerId: string;
       targetId: string;
+      damage: number;
+      wasGuarded: boolean;
       targetHpRemaining: number;
       hpApplied: boolean;
       origin: THREE.Vector3;
@@ -63,6 +70,8 @@ type ActiveAnimation =
       kind: 'rangedAttack';
       attackerId: string;
       targetId: string;
+      damage: number;
+      wasGuarded: boolean;
       targetHpRemaining: number;
       hpApplied: boolean;
       origin: THREE.Vector3;
@@ -94,8 +103,59 @@ type ActiveAnimation =
       kind: 'heal';
       casterId: string;
       targetId: string;
+      amount: number;
       targetHpAfter: number;
+      isDarkMend?: boolean;
       hpApplied: boolean;
+      elapsed: number;
+      duration: number;
+    }
+  | {
+      kind: 'guard';
+      unitId: string;
+      vfxGroup: THREE.Group | null;
+      textShown: boolean;
+      elapsed: number;
+      duration: number;
+    }
+  | {
+      kind: 'prepareAttack';
+      casterId: string;
+      skillName: string;
+      targetCells: THREE.Vector3[];
+      vfxGroup: THREE.Group | null;
+      textShown: boolean;
+      elapsed: number;
+      duration: number;
+    }
+  | {
+      kind: 'resolvePendingAttack';
+      pendingAttackId: string;
+      casterId: string;
+      targetCells: THREE.Vector3[];
+      vfxGroup: THREE.Group | null;
+      hits: Array<{
+        targetId: string;
+        damage: number;
+        wasGuarded: boolean;
+        targetHpRemaining: number;
+        hpApplied: boolean;
+      }>;
+      elapsed: number;
+      duration: number;
+    }
+  | {
+      kind: 'cancelAttack';
+      casterId: string;
+      vfxGroup: THREE.Group | null;
+      elapsed: number;
+      duration: number;
+    }
+  | {
+      kind: 'bossPhase';
+      unitId: string;
+      vfxGroup: THREE.Group | null;
+      textShown: boolean;
       elapsed: number;
       duration: number;
     };
@@ -111,6 +171,8 @@ export class UnitRenderer {
   private latestSelectedId: string | null = null;
   private latestTurnOrder: string[] = [];
   private needsInitialFacing = false;
+  private latestCamera: THREE.Camera | null = null;
+  private animClock = 0;
 
   constructor(scene: THREE.Scene, board: BoardRenderer, hpContainer: HTMLElement) {
     this.scene = scene;
@@ -134,6 +196,15 @@ export class UnitRenderer {
       this.latestTurnOrder = turnOrder;
     }
     const highlightActiveId = activeUnitId !== undefined ? activeUnitId : selectedUnitId;
+    const incomingIds = new Set(units.map((u) => u.id));
+    for (const [id, oldVisual] of this.visuals) {
+      if (!incomingIds.has(id)) {
+        oldVisual.controller.dispose();
+        this.disposeObjectGroup(oldVisual.root);
+        oldVisual.hpBarEl.remove();
+        this.visuals.delete(id);
+      }
+    }
 
     for (const unit of units) {
       let visual = this.visuals.get(unit.id);
@@ -150,9 +221,15 @@ export class UnitRenderer {
 
       visual.maxHp = unit.maxHp;
       visual.alive = unit.alive;
+      visual.isGuarding = unit.isGuarding;
+      visual.bossPhase = unit.bossPhase;
+      visual.shieldAura.visible = unit.alive && unit.isGuarding;
+      if (visual.bossEmberAura) {
+        visual.bossEmberAura.visible = unit.alive && unit.bossPhase === 2;
+      }
 
       if (!this.isPendingAttackTarget(unit.id)) {
-        this.applyHpBar(visual, unit.hp, unit.maxHp);
+        this.applyHpBar(visual, unit.hp, unit.maxHp, unit.isGuarding);
       }
 
       const isSelected = unit.id === selectedUnitId && unit.alive;
@@ -161,7 +238,9 @@ export class UnitRenderer {
       if (unit.alive) {
         visual.deathClipPlayed = false;
         const targetOpacity =
-          unit.id === highlightActiveId ? ACTIVE_UNIT_OPACITY : INACTIVE_UNIT_OPACITY;
+          unit.team === 'enemy' || unit.id === highlightActiveId
+            ? ACTIVE_UNIT_OPACITY
+            : INACTIVE_UNIT_OPACITY;
         this.setUnitOpacity(visual, targetOpacity);
       } else if (unit.team === 'player') {
         this.setUnitOpacity(visual, INACTIVE_UNIT_OPACITY);
@@ -209,6 +288,12 @@ export class UnitRenderer {
         for (const visual of this.visuals.values()) {
           visual.root.visible = true;
           visual.baseRing.visible = true;
+          visual.isGuarding = false;
+          visual.shieldAura.visible = false;
+          visual.bossPhase = undefined;
+          if (visual.bossEmberAura) {
+            visual.bossEmberAura.visible = false;
+          }
           visual.deathClipPlayed = false;
           visual.facingYaw = 0;
           visual.targetYaw = 0;
@@ -250,6 +335,24 @@ export class UnitRenderer {
           });
         }
       } else if (ev.type === 'unitAttacked') {
+        if (ev.pendingAttackId !== undefined) {
+          const pendingResolve = [...this.queue]
+            .reverse()
+            .find(
+              (a): a is Extract<ActiveAnimation, { kind: 'resolvePendingAttack' }> =>
+                a.kind === 'resolvePendingAttack' && a.pendingAttackId === ev.pendingAttackId
+            );
+          if (pendingResolve) {
+            pendingResolve.hits.push({
+              targetId: ev.targetId,
+              damage: ev.damage,
+              wasGuarded: ev.wasGuarded ?? false,
+              targetHpRemaining: ev.targetHpRemaining,
+              hpApplied: false,
+            });
+          }
+          continue;
+        }
         if (ev.skillId !== undefined) {
           // Habilidade já possui skillVfx próprio: não enfileirar segundo projétil.
           const pendingSkill = [...this.queue]
@@ -280,6 +383,8 @@ export class UnitRenderer {
               kind: 'rangedAttack',
               attackerId: ev.attackerId,
               targetId: ev.targetId,
+              damage: ev.damage,
+              wasGuarded: ev.wasGuarded ?? false,
               targetHpRemaining: ev.targetHpRemaining,
               hpApplied: false,
               origin: attacker.root.position.clone(),
@@ -294,6 +399,8 @@ export class UnitRenderer {
               kind: 'meleeAttack',
               attackerId: ev.attackerId,
               targetId: ev.targetId,
+              damage: ev.damage,
+              wasGuarded: ev.wasGuarded ?? false,
               targetHpRemaining: ev.targetHpRemaining,
               hpApplied: false,
               origin: attacker.root.position.clone(),
@@ -303,15 +410,66 @@ export class UnitRenderer {
             });
           }
         }
+      } else if (ev.type === 'unitGuarded') {
+        this.queue.push({
+          kind: 'guard',
+          unitId: ev.unitId,
+          vfxGroup: null,
+          textShown: false,
+          elapsed: 0,
+          duration: 0.45,
+        });
       } else if (ev.type === 'unitHealed') {
+        const caster = this.visuals.get(ev.casterId);
         this.queue.push({
           kind: 'heal',
           casterId: ev.casterId,
           targetId: ev.targetId,
+          amount: ev.amount,
           targetHpAfter: ev.targetHpAfter,
+          isDarkMend: caster?.type === 'necromancer-acolyte',
           hpApplied: false,
           elapsed: 0,
           duration: 0.42,
+        });
+      } else if (ev.type === 'attackPrepared') {
+        this.queue.push({
+          kind: 'prepareAttack',
+          casterId: ev.pendingAttack.casterId,
+          skillName: ev.pendingAttack.skillName,
+          targetCells: ev.pendingAttack.targetCells.map((c) => this.board.gridToWorld(c, 0)),
+          vfxGroup: null,
+          textShown: false,
+          elapsed: 0,
+          duration: 0.46,
+        });
+      } else if (ev.type === 'pendingAttackResolved') {
+        this.queue.push({
+          kind: 'resolvePendingAttack',
+          pendingAttackId: ev.pendingAttackId,
+          casterId: ev.casterId,
+          targetCells: ev.targetCells.map((c) => this.board.gridToWorld(c, 0)),
+          vfxGroup: null,
+          hits: [],
+          elapsed: 0,
+          duration: 0.58,
+        });
+      } else if (ev.type === 'attackCancelled') {
+        this.queue.push({
+          kind: 'cancelAttack',
+          casterId: ev.casterId,
+          vfxGroup: null,
+          elapsed: 0,
+          duration: 0.28,
+        });
+      } else if (ev.type === 'bossPhaseChanged') {
+        this.queue.push({
+          kind: 'bossPhase',
+          unitId: ev.unitId,
+          vfxGroup: null,
+          textShown: false,
+          elapsed: 0,
+          duration: 0.65,
         });
       } else if (ev.type === 'unitDied') {
         this.queue.push({
@@ -325,6 +483,9 @@ export class UnitRenderer {
   }
 
   update(dt: number, camera: THREE.Camera): void {
+    this.latestCamera = camera;
+    this.animClock += dt;
+
     if (!this.currentAnim && this.queue.length > 0) {
       this.currentAnim = this.queue.shift() ?? null;
       this.initAnimation(this.currentAnim);
@@ -334,8 +495,28 @@ export class UnitRenderer {
       this.stepAnimation(this.currentAnim, dt);
     }
 
+    const pulse = 0.5 + 0.5 * Math.sin(this.animClock * 4.2);
+
     for (const visual of this.visuals.values()) {
       visual.controller.update(dt);
+      if (visual.shieldAura.visible) {
+        const auraScale = 1 + pulse * 0.08;
+        visual.shieldAura.scale.set(auraScale, 1, auraScale);
+        const auraMat = visual.shieldAura.material as THREE.MeshBasicMaterial;
+        auraMat.opacity = 0.45 + pulse * 0.35;
+      }
+      if (visual.bossEmberAura && visual.bossEmberAura.visible) {
+        const emberScale = 1 + pulse * 0.12;
+        visual.bossEmberAura.scale.set(emberScale, 1, emberScale);
+        const emberMat = visual.bossEmberAura.material as THREE.MeshBasicMaterial;
+        emberMat.opacity = 0.4 + pulse * 0.35;
+      }
+      if (visual.alive && visual.bossPhase === 2 && !this.isUnitInAnimation(visual.id)) {
+        for (const mat of visual.controller.getMaterials()) {
+          mat.emissive.setHex(0x991b1b);
+          mat.emissiveIntensity = 0.18 + pulse * 0.16;
+        }
+      }
       if (!visual.alive || this.isUnitInAnimation(visual.id)) continue;
       const delta = shortestAngleDelta(visual.facingYaw, visual.targetYaw);
       if (Math.abs(delta) > 0.001) {
@@ -363,6 +544,156 @@ export class UnitRenderer {
       if (visual) {
         visual.deathClipPlayed = true;
         visual.controller.playClip('Death_A', false, 1.8);
+      }
+      return;
+    }
+
+    if (anim.kind === 'guard') {
+      const visual = this.visuals.get(anim.unitId);
+      if (visual) {
+        visual.controller.playClip('Block', false, 1.4);
+        const vfxGroup = new THREE.Group();
+        const addPulseRing = (pos: THREE.Vector3, colorHex: number, radius: number) => {
+          const geo = new THREE.RingGeometry(radius * 0.72, radius, 24);
+          geo.rotateX(-Math.PI / 2);
+          const mat = new THREE.MeshBasicMaterial({
+            color: colorHex,
+            transparent: true,
+            opacity: 0.9,
+            side: THREE.DoubleSide,
+            depthWrite: false,
+          });
+          const ring = new THREE.Mesh(geo, mat);
+          ring.position.set(pos.x, 0.1, pos.z);
+          vfxGroup.add(ring);
+        };
+        addPulseRing(visual.root.position, 0x38bdf8, 0.48);
+        this.scene.add(vfxGroup);
+        anim.vfxGroup = vfxGroup;
+      }
+      return;
+    }
+
+    if (anim.kind === 'prepareAttack') {
+      const caster = this.visuals.get(anim.casterId);
+      if (caster) {
+        caster.controller.playClip('Spellcast_Shoot', false, 1.2);
+      }
+      const vfxGroup = new THREE.Group();
+      for (const cellPos of anim.targetCells) {
+        const ringGeo = new THREE.RingGeometry(0.28, 0.44, 4);
+        ringGeo.rotateZ(Math.PI / 4);
+        ringGeo.rotateX(-Math.PI / 2);
+        const ringMat = new THREE.MeshBasicMaterial({
+          color: 0xf97316,
+          transparent: true,
+          opacity: 0.85,
+          side: THREE.DoubleSide,
+          depthWrite: false,
+        });
+        const ring = new THREE.Mesh(ringGeo, ringMat);
+        ring.position.set(cellPos.x, 0.08, cellPos.z);
+        vfxGroup.add(ring);
+      }
+      if (caster) {
+        const auraGeo = new THREE.RingGeometry(0.4, 0.58, 24);
+        auraGeo.rotateX(-Math.PI / 2);
+        const auraMat = new THREE.MeshBasicMaterial({
+          color: 0xef4444,
+          transparent: true,
+          opacity: 0.9,
+          side: THREE.DoubleSide,
+          depthWrite: false,
+        });
+        const aura = new THREE.Mesh(auraGeo, auraMat);
+        aura.position.set(caster.root.position.x, 0.1, caster.root.position.z);
+        vfxGroup.add(aura);
+      }
+      this.scene.add(vfxGroup);
+      anim.vfxGroup = vfxGroup;
+      return;
+    }
+
+    if (anim.kind === 'resolvePendingAttack') {
+      const caster = this.visuals.get(anim.casterId);
+      if (caster) {
+        caster.controller.playClip('1H_Melee_Attack_Slice_Diagonal', false, 1.5);
+      }
+      const vfxGroup = new THREE.Group();
+      for (const cellPos of anim.targetCells) {
+        const ringGeo = new THREE.RingGeometry(0.22, 0.46, 20);
+        ringGeo.rotateX(-Math.PI / 2);
+        const ringMat = new THREE.MeshBasicMaterial({
+          color: 0xef4444,
+          transparent: true,
+          opacity: 0.92,
+          side: THREE.DoubleSide,
+          depthWrite: false,
+        });
+        const ring = new THREE.Mesh(ringGeo, ringMat);
+        ring.position.set(cellPos.x, 0.09, cellPos.z);
+
+        const burstGeo = new THREE.SphereGeometry(0.24, 10, 10);
+        const burstMat = new THREE.MeshBasicMaterial({
+          color: 0xf97316,
+          transparent: true,
+          opacity: 0.9,
+        });
+        const burst = new THREE.Mesh(burstGeo, burstMat);
+        burst.position.set(cellPos.x, 0.32, cellPos.z);
+
+        vfxGroup.add(ring, burst);
+      }
+      this.scene.add(vfxGroup);
+      anim.vfxGroup = vfxGroup;
+      return;
+    }
+
+    if (anim.kind === 'cancelAttack') {
+      const caster = this.visuals.get(anim.casterId);
+      if (caster) {
+        const vfxGroup = new THREE.Group();
+        const puffGeo = new THREE.RingGeometry(0.26, 0.48, 16);
+        puffGeo.rotateX(-Math.PI / 2);
+        const puffMat = new THREE.MeshBasicMaterial({
+          color: 0x94a3b8,
+          transparent: true,
+          opacity: 0.75,
+          side: THREE.DoubleSide,
+          depthWrite: false,
+        });
+        const puff = new THREE.Mesh(puffGeo, puffMat);
+        puff.position.set(caster.root.position.x, 0.12, caster.root.position.z);
+        vfxGroup.add(puff);
+        this.scene.add(vfxGroup);
+        anim.vfxGroup = vfxGroup;
+      }
+      return;
+    }
+
+    if (anim.kind === 'bossPhase') {
+      const boss = this.visuals.get(anim.unitId);
+      if (boss) {
+        boss.bossPhase = 2;
+        if (boss.bossEmberAura) {
+          boss.bossEmberAura.visible = true;
+        }
+        boss.controller.playClip('Spellcast_Shoot', false, 1.3);
+        const vfxGroup = new THREE.Group();
+        const waveGeo = new THREE.RingGeometry(0.35, 0.65, 28);
+        waveGeo.rotateX(-Math.PI / 2);
+        const waveMat = new THREE.MeshBasicMaterial({
+          color: 0xf97316,
+          transparent: true,
+          opacity: 0.95,
+          side: THREE.DoubleSide,
+          depthWrite: false,
+        });
+        const wave = new THREE.Mesh(waveGeo, waveMat);
+        wave.position.set(boss.root.position.x, 0.12, boss.root.position.z);
+        vfxGroup.add(wave);
+        this.scene.add(vfxGroup);
+        anim.vfxGroup = vfxGroup;
       }
       return;
     }
@@ -498,6 +829,31 @@ export class UnitRenderer {
       });
       const halo = new THREE.Mesh(haloGeo, haloMat);
       halo.position.y = 0.48;
+      group.add(ring, halo);
+    } else if (skillId === 'dark-mend') {
+      const ringGeo = new THREE.RingGeometry(0.24, 0.48, 20);
+      ringGeo.rotateX(-Math.PI / 2);
+      const ringMat = new THREE.MeshBasicMaterial({
+        color: 0x10b981,
+        transparent: true,
+        opacity: 0.92,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+      });
+      const ring = new THREE.Mesh(ringGeo, ringMat);
+      ring.position.y = 0.08;
+
+      const haloGeo = new THREE.RingGeometry(0.18, 0.36, 16);
+      haloGeo.rotateX(-Math.PI / 2);
+      const haloMat = new THREE.MeshBasicMaterial({
+        color: 0x9333ea,
+        transparent: true,
+        opacity: 0.88,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+      });
+      const halo = new THREE.Mesh(haloGeo, haloMat);
+      halo.position.y = 0.46;
       group.add(ring, halo);
     } else {
       // marked-shot target reticle burst
@@ -784,16 +1140,219 @@ export class UnitRenderer {
 
       if (!anim.hpApplied && progress >= 0.25) {
         anim.hpApplied = true;
-        this.applyHpBar(target, anim.targetHpAfter, target.maxHp);
+        this.applyHpBar(target, anim.targetHpAfter, target.maxHp, target.isGuarding);
+        if (anim.amount > 0) {
+          this.spawnFloatingText(target.root.position, `+${anim.amount}`, 'heal');
+        }
       }
 
       const glow = Math.sin(progress * Math.PI);
       target.bodyGroup.position.y = glow * 0.08;
-      this.setFlash(target, glow, progress < 0.5 ? 0x4ade80 : 0xfacc15);
+      const healColor = anim.isDarkMend
+        ? progress < 0.5
+          ? 0x10b981
+          : 0x9333ea
+        : progress < 0.5
+          ? 0x4ade80
+          : 0xfacc15;
+      this.setFlash(target, glow, healColor);
 
       if (progress >= 1) {
         target.bodyGroup.position.y = 0;
         this.setFlash(target, 0);
+        this.finishCurrentAnimation();
+      }
+      return;
+    }
+
+    if (anim.kind === 'guard') {
+      const visual = this.visuals.get(anim.unitId);
+      if (!visual) {
+        this.disposeObjectGroup(anim.vfxGroup);
+        this.finishCurrentAnimation();
+        return;
+      }
+
+      anim.elapsed += dt;
+      const progress = Math.min(1, anim.elapsed / anim.duration);
+
+      if (!anim.textShown && progress >= 0.2) {
+        anim.textShown = true;
+        visual.isGuarding = true;
+        visual.shieldAura.visible = true;
+        this.spawnFloatingText(visual.root.position, '🛡️ Defesa -50%', 'shield');
+      }
+
+      const glow = Math.sin(progress * Math.PI);
+      this.setFlash(visual, glow * 0.65, 0x38bdf8);
+
+      if (anim.vfxGroup) {
+        for (const child of anim.vfxGroup.children) {
+          if (child instanceof THREE.Mesh) {
+            const s = 0.8 + progress * 0.75;
+            child.scale.set(s, 1, s);
+            (child.material as THREE.MeshBasicMaterial).opacity = (1 - progress) * 0.85;
+          }
+        }
+      }
+
+      if (progress >= 1) {
+        this.setFlash(visual, 0);
+        this.disposeObjectGroup(anim.vfxGroup);
+        anim.vfxGroup = null;
+        this.finishCurrentAnimation();
+      }
+      return;
+    }
+
+    if (anim.kind === 'prepareAttack') {
+      const caster = this.visuals.get(anim.casterId);
+      anim.elapsed += dt;
+      const progress = Math.min(1, anim.elapsed / anim.duration);
+
+      if (!anim.textShown && progress >= 0.15 && caster) {
+        anim.textShown = true;
+        this.spawnFloatingText(caster.root.position, `⚠ ${anim.skillName}`, 'damage');
+      }
+
+      if (caster) {
+        const pulse = Math.sin(progress * Math.PI);
+        this.setFlash(caster, pulse * 0.65, 0xf97316);
+      }
+
+      if (anim.vfxGroup) {
+        const s = 0.85 + Math.sin(progress * Math.PI) * 0.25;
+        for (const child of anim.vfxGroup.children) {
+          if (child instanceof THREE.Mesh) {
+            child.scale.set(s, 1, s);
+            (child.material as THREE.MeshBasicMaterial).opacity = (1 - progress * 0.45) * 0.85;
+          }
+        }
+      }
+
+      if (progress >= 1) {
+        if (caster) {
+          this.setFlash(caster, 0);
+          if (caster.alive) caster.controller.resetToIdle();
+        }
+        this.disposeObjectGroup(anim.vfxGroup);
+        anim.vfxGroup = null;
+        this.finishCurrentAnimation();
+      }
+      return;
+    }
+
+    if (anim.kind === 'resolvePendingAttack') {
+      const caster = this.visuals.get(anim.casterId);
+      anim.elapsed += dt;
+      const progress = Math.min(1, anim.elapsed / anim.duration);
+
+      if (caster) {
+        const pulse = Math.sin(progress * Math.PI);
+        this.setFlash(caster, pulse * 0.5, 0xef4444);
+      }
+
+      if (anim.vfxGroup) {
+        for (const child of anim.vfxGroup.children) {
+          if (child instanceof THREE.Mesh) {
+            const isSphere = child.geometry instanceof THREE.SphereGeometry;
+            const s = isSphere ? 0.5 + progress * 1.6 : 0.7 + progress * 1.4;
+            child.scale.setScalar(s);
+            (child.material as THREE.MeshBasicMaterial).opacity = Math.max(0, 1 - progress);
+          }
+        }
+      }
+
+      const flashIntensity = Math.sin(Math.min(1, progress * 1.4) * Math.PI);
+      for (const hit of anim.hits) {
+        const target = this.visuals.get(hit.targetId);
+        if (!target) continue;
+        if (!hit.hpApplied && progress >= 0.28) {
+          hit.hpApplied = true;
+          this.applyHpBar(target, hit.targetHpRemaining, target.maxHp, target.isGuarding);
+          target.controller.playClip('Hit_A', false, 1.8);
+          this.spawnFloatingText(
+            target.root.position,
+            hit.wasGuarded ? `-${hit.damage} 🛡` : `-${hit.damage}`,
+            'damage'
+          );
+        }
+        this.setFlash(target, flashIntensity, 0xef4444);
+      }
+
+      if (progress >= 1) {
+        if (caster) {
+          this.setFlash(caster, 0);
+          if (caster.alive) caster.controller.resetToIdle();
+        }
+        for (const hit of anim.hits) {
+          const target = this.visuals.get(hit.targetId);
+          if (target) {
+            this.setFlash(target, 0);
+            if (target.alive) target.controller.resetToIdle();
+          }
+        }
+        this.disposeObjectGroup(anim.vfxGroup);
+        anim.vfxGroup = null;
+        this.finishCurrentAnimation();
+      }
+      return;
+    }
+
+    if (anim.kind === 'cancelAttack') {
+      anim.elapsed += dt;
+      const progress = Math.min(1, anim.elapsed / anim.duration);
+      if (anim.vfxGroup) {
+        for (const child of anim.vfxGroup.children) {
+          if (child instanceof THREE.Mesh) {
+            const s = 1 + progress * 0.5;
+            child.scale.set(s, 1, s);
+            (child.material as THREE.MeshBasicMaterial).opacity = (1 - progress) * 0.75;
+          }
+        }
+      }
+      if (progress >= 1) {
+        this.disposeObjectGroup(anim.vfxGroup);
+        anim.vfxGroup = null;
+        this.finishCurrentAnimation();
+      }
+      return;
+    }
+
+    if (anim.kind === 'bossPhase') {
+      const boss = this.visuals.get(anim.unitId);
+      anim.elapsed += dt;
+      const progress = Math.min(1, anim.elapsed / anim.duration);
+
+      if (!anim.textShown && progress >= 0.15 && boss) {
+        anim.textShown = true;
+        this.spawnFloatingText(boss.root.position, '🔥 Fúria das Cinzas!', 'damage');
+      }
+
+      if (boss) {
+        const pulse = Math.sin(progress * Math.PI);
+        boss.bodyGroup.scale.setScalar(1 + pulse * 0.14);
+        this.setFlash(boss, pulse * 0.85, 0xf97316);
+      }
+
+      if (anim.vfxGroup) {
+        for (const child of anim.vfxGroup.children) {
+          if (child instanceof THREE.Mesh) {
+            const s = 0.8 + progress * 2.2;
+            child.scale.set(s, 1, s);
+            (child.material as THREE.MeshBasicMaterial).opacity = (1 - progress) * 0.9;
+          }
+        }
+      }
+
+      if (progress >= 1) {
+        if (boss) {
+          boss.bodyGroup.scale.setScalar(1);
+          this.setFlash(boss, 0);
+          if (boss.alive) boss.controller.resetToIdle();
+        }
+        this.disposeObjectGroup(anim.vfxGroup);
+        anim.vfxGroup = null;
         this.finishCurrentAnimation();
       }
       return;
@@ -837,7 +1396,7 @@ export class UnitRenderer {
   }
 
   private applyTargetHitReaction(
-    anim: { targetHpRemaining: number; hpApplied: boolean },
+    anim: { targetHpRemaining: number; hpApplied: boolean; damage?: number; wasGuarded?: boolean },
     target: UnitVisual,
     progress: number,
     dirX: number,
@@ -848,8 +1407,18 @@ export class UnitRenderer {
 
     if (!anim.hpApplied) {
       anim.hpApplied = true;
-      this.applyHpBar(target, anim.targetHpRemaining, target.maxHp);
-      target.controller.playClip('Hit_A', false, 1.8);
+      this.applyHpBar(target, anim.targetHpRemaining, target.maxHp, target.isGuarding);
+      if (anim.wasGuarded) {
+        target.controller.playClip('Block_Hit', false, 1.5);
+        if (anim.damage !== undefined && anim.damage > 0) {
+          this.spawnFloatingText(target.root.position, `-${anim.damage} (🛡️ -50%)`, 'damage');
+        }
+      } else {
+        target.controller.playClip('Hit_A', false, 1.8);
+        if (anim.damage !== undefined && anim.damage > 0) {
+          this.spawnFloatingText(target.root.position, `-${anim.damage}`, 'damage');
+        }
+      }
     }
 
     const span = 1 - impactStart;
@@ -878,6 +1447,8 @@ export class UnitRenderer {
       this.disposeMesh(this.currentAnim.projectile);
     } else if (this.currentAnim?.kind === 'skillVfx') {
       this.disposeMesh(this.currentAnim.projectile);
+      this.disposeObjectGroup(this.currentAnim.vfxGroup);
+    } else if (this.currentAnim?.kind === 'guard') {
       this.disposeObjectGroup(this.currentAnim.vfxGroup);
     }
   }
@@ -911,8 +1482,15 @@ export class UnitRenderer {
   private isUnitInAnimation(unitId: string): boolean {
     const check = (a: ActiveAnimation | null): boolean => {
       if (!a) return false;
-      if (a.kind === 'move' || a.kind === 'die') return a.unitId === unitId;
-      if (a.kind === 'skillVfx') return a.casterId === unitId;
+      if (a.kind === 'move' || a.kind === 'die' || a.kind === 'guard' || a.kind === 'bossPhase') {
+        return a.unitId === unitId;
+      }
+      if (a.kind === 'skillVfx' || a.kind === 'prepareAttack' || a.kind === 'cancelAttack') {
+        return a.casterId === unitId;
+      }
+      if (a.kind === 'resolvePendingAttack') {
+        return a.casterId === unitId || a.hits.some((h) => h.targetId === unitId);
+      }
       if (a.kind === 'heal') return a.casterId === unitId || a.targetId === unitId;
       return a.attackerId === unitId || a.targetId === unitId;
     };
@@ -922,7 +1500,7 @@ export class UnitRenderer {
   private isPendingAttackTarget(unitId: string): boolean {
     const check = (a: ActiveAnimation | null): boolean => {
       if (!a) return false;
-      if (a.kind === 'skillVfx') {
+      if (a.kind === 'skillVfx' || a.kind === 'resolvePendingAttack') {
         return a.hits.some((h) => h.targetId === unitId && !h.hpApplied);
       }
       return (
@@ -934,11 +1512,45 @@ export class UnitRenderer {
     return check(this.currentAnim) || this.queue.some(check);
   }
 
-  private applyHpBar(visual: UnitVisual, hp: number, maxHp: number): void {
+  private applyHpBar(visual: UnitVisual, hp: number, maxHp: number, isGuarding = visual.isGuarding): void {
     visual.hp = hp;
+    visual.isGuarding = isGuarding;
     const pct = Math.max(0, Math.min(100, (hp / maxHp) * 100));
     visual.hpFillEl.style.width = `${pct}%`;
     visual.hpTextEl.textContent = `${hp}/${maxHp}`;
+    if (isGuarding) {
+      visual.shieldBadgeEl.textContent = '🛡 -50%';
+      visual.shieldBadgeEl.classList.remove('hidden');
+    } else {
+      visual.shieldBadgeEl.textContent = '';
+      visual.shieldBadgeEl.classList.add('hidden');
+    }
+  }
+
+  private spawnFloatingText(
+    worldPos: THREE.Vector3,
+    text: string,
+    variant: 'damage' | 'heal' | 'shield'
+  ): void {
+    if (!this.latestCamera) return;
+    const temp = worldPos.clone();
+    temp.y += 1.45;
+    temp.project(this.latestCamera);
+    if (temp.z > 1) return;
+
+    const sx = (temp.x * 0.5 + 0.5) * window.innerWidth;
+    const sy = (-temp.y * 0.5 + 0.5) * window.innerHeight;
+
+    const el = document.createElement('div');
+    el.className = `floating-combat-text floating-combat-text--${variant}`;
+    el.textContent = text;
+    el.style.left = `${sx}px`;
+    el.style.top = `${sy}px`;
+    el.addEventListener('animationend', () => el.remove(), { once: true });
+    this.hpContainer.appendChild(el);
+    window.setTimeout(() => {
+      if (el.isConnected) el.remove();
+    }, 1100);
   }
 
   private setUnitOpacity(visual: UnitVisual, opacity: number): void {
@@ -953,9 +1565,15 @@ export class UnitRenderer {
   }
 
   private setFlash(visual: UnitVisual, intensity: number, colorHex = 0xffffff): void {
+    const keepBossEmber = intensity <= 0 && visual.alive && visual.bossPhase === 2;
     for (const mat of visual.controller.getMaterials()) {
-      mat.emissive.setHex(intensity > 0 ? colorHex : 0x000000);
-      mat.emissiveIntensity = intensity * 0.75;
+      if (keepBossEmber) {
+        mat.emissive.setHex(0x991b1b);
+        mat.emissiveIntensity = 0.22;
+      } else {
+        mat.emissive.setHex(intensity > 0 ? colorHex : 0x000000);
+        mat.emissiveIntensity = intensity * 0.75;
+      }
     }
   }
 
@@ -1020,13 +1638,47 @@ export class UnitRenderer {
     baseRing.position.y = 0.024;
     root.add(baseRing);
 
+    const shieldGeo = new THREE.RingGeometry(0.41, 0.49, 24);
+    shieldGeo.rotateX(-Math.PI / 2);
+    const shieldMat = new THREE.MeshBasicMaterial({
+      color: 0x38bdf8,
+      transparent: true,
+      opacity: 0.65,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    const shieldAura = new THREE.Mesh(shieldGeo, shieldMat);
+    shieldAura.position.y = 0.036;
+    shieldAura.visible = unit.isGuarding;
+    root.add(shieldAura);
+
+    let bossEmberAura: THREE.Mesh | null = null;
+    if (unit.type === 'ashen-guardian') {
+      const emberGeo = new THREE.RingGeometry(0.45, 0.56, 24);
+      emberGeo.rotateX(-Math.PI / 2);
+      const emberMat = new THREE.MeshBasicMaterial({
+        color: 0xf97316,
+        transparent: true,
+        opacity: 0.65,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+      });
+      bossEmberAura = new THREE.Mesh(emberGeo, emberMat);
+      bossEmberAura.position.y = 0.042;
+      bossEmberAura.visible = unit.alive && unit.bossPhase === 2;
+      root.add(bossEmberAura);
+    }
+
     const weaponPivot = this.buildModelByType(unit.type, proceduralGroup, flashMaterials);
     const weaponRestRotX = weaponPivot.rotation.x;
 
-    const hitboxGeo = new THREE.BoxGeometry(0.75, 1.25, 0.75);
+    const isBoss = unit.type === 'ashen-guardian';
+    const hitboxGeo = isBoss
+      ? new THREE.BoxGeometry(0.85, 1.55, 0.85)
+      : new THREE.BoxGeometry(0.75, 1.25, 0.75);
     const hitboxMat = new THREE.MeshBasicMaterial({ visible: false });
     const hitbox = new THREE.Mesh(hitboxGeo, hitboxMat);
-    hitbox.position.y = 0.62;
+    hitbox.position.y = isBoss ? 0.78 : 0.62;
     hitbox.userData = { unitId: unit.id };
     root.add(hitbox);
 
@@ -1043,8 +1695,12 @@ export class UnitRenderer {
     const hpTextEl = document.createElement('span');
     hpTextEl.className = 'unit-hp-text';
 
+    const shieldBadgeEl = document.createElement('span');
+    shieldBadgeEl.className = 'unit-shield-badge hidden';
+
     hpBarEl.appendChild(track);
     hpBarEl.appendChild(hpTextEl);
+    hpBarEl.appendChild(shieldBadgeEl);
 
     const unitMaterials: THREE.MeshStandardMaterial[] = [];
     const seenMaterials = new Set<THREE.Material>();
@@ -1084,15 +1740,20 @@ export class UnitRenderer {
       weaponPivot,
       weaponRestRotX,
       baseRing,
+      shieldAura,
+      bossEmberAura,
       hitbox,
       flashMaterials,
       unitMaterials,
       hpBarEl,
       hpFillEl,
       hpTextEl,
+      shieldBadgeEl,
       alive: unit.alive,
       hp: unit.hp,
       maxHp: unit.maxHp,
+      isGuarding: unit.isGuarding,
+      bossPhase: unit.bossPhase,
       facingYaw: initialYaw,
       targetYaw: initialYaw,
       lastOpacity: ACTIVE_UNIT_OPACITY,
@@ -1155,12 +1816,20 @@ export class UnitRenderer {
         return this.buildMeleeSkeleton(bodyGroup, flashMaterials);
       case 'skeleton-archer':
         return this.buildSkeletonArcher(bodyGroup, flashMaterials);
-      case 'armored-skeleton':
-        return this.buildArmoredSkeleton(bodyGroup, flashMaterials);
       case 'goblin-scout':
         return this.buildGoblinScout(bodyGroup, flashMaterials);
+      case 'goblin-stalker':
+        return this.buildGoblinStalker(bodyGroup, flashMaterials);
+      case 'armored-skeleton':
+        return this.buildArmoredSkeleton(bodyGroup, flashMaterials);
+      case 'skeleton-shieldbearer':
+        return this.buildSkeletonShieldbearer(bodyGroup, flashMaterials);
+      case 'ashen-guardian':
+        return this.buildAshenGuardian(bodyGroup, flashMaterials);
       case 'cultist-mage':
         return this.buildCultistMage(bodyGroup, flashMaterials);
+      case 'necromancer-acolyte':
+        return this.buildNecromancerAcolyte(bodyGroup, flashMaterials);
     }
   }
 
@@ -1592,6 +2261,212 @@ export class UnitRenderer {
     weaponPivot.add(staff, crystal);
 
     bodyGroup.add(robe, mantle, hood, weaponPivot);
+    return weaponPivot;
+  }
+
+  private buildGoblinStalker(
+    bodyGroup: THREE.Group,
+    flash: THREE.MeshStandardMaterial[]
+  ): THREE.Group {
+    const darkMoss = new THREE.MeshStandardMaterial({ color: 0x365314, roughness: 0.8 });
+    const cloakMat = new THREE.MeshStandardMaterial({ color: 0x1f2937, roughness: 0.88 });
+    const bladeMat = new THREE.MeshStandardMaterial({ color: 0xcbd5e1, roughness: 0.35, metalness: 0.6 });
+    flash.push(darkMoss, cloakMat, bladeMat);
+
+    bodyGroup.scale.setScalar(0.95);
+
+    const legGeo = new THREE.BoxGeometry(0.1, 0.22, 0.1);
+    const lLeg = new THREE.Mesh(legGeo, darkMoss);
+    lLeg.position.set(-0.08, 0.11, 0);
+    const rLeg = new THREE.Mesh(legGeo, darkMoss);
+    rLeg.position.set(0.08, 0.11, 0);
+
+    const torso = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.3, 0.2), cloakMat);
+    torso.position.y = 0.36;
+    torso.castShadow = true;
+
+    const head = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.2, 0.22), darkMoss);
+    head.position.y = 0.6;
+    head.castShadow = true;
+
+    const hood = new THREE.Mesh(new THREE.ConeGeometry(0.19, 0.28, 6), cloakMat);
+    hood.position.set(0, 0.74, -0.02);
+    hood.rotation.x = -0.25;
+    hood.castShadow = true;
+
+    const offhandDagger = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.24, 0.06), bladeMat);
+    offhandDagger.position.set(-0.2, 0.36, 0.12);
+    offhandDagger.rotation.x = Math.PI / 3;
+
+    const weaponPivot = new THREE.Group();
+    weaponPivot.position.set(0.2, 0.34, 0.1);
+    weaponPivot.rotation.x = Math.PI / 4;
+    const dagger = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.3, 0.07), bladeMat);
+    dagger.position.y = 0.16;
+    dagger.castShadow = true;
+    weaponPivot.add(dagger);
+
+    bodyGroup.add(lLeg, rLeg, torso, head, hood, offhandDagger, weaponPivot);
+    return weaponPivot;
+  }
+
+  private buildSkeletonShieldbearer(
+    bodyGroup: THREE.Group,
+    flash: THREE.MeshStandardMaterial[]
+  ): THREE.Group {
+    const slateArmor = new THREE.MeshStandardMaterial({ color: 0x64748b, roughness: 0.45, metalness: 0.55 });
+    const steelTrim = new THREE.MeshStandardMaterial({ color: 0x94a3b8, roughness: 0.35, metalness: 0.65 });
+    const bone = new THREE.MeshStandardMaterial({ color: 0xe5e7eb, roughness: 0.65 });
+    flash.push(slateArmor, steelTrim, bone);
+
+    bodyGroup.scale.setScalar(1.06);
+
+    const legGeo = new THREE.BoxGeometry(0.12, 0.24, 0.13);
+    const lLeg = new THREE.Mesh(legGeo, slateArmor);
+    lLeg.position.set(-0.1, 0.12, 0);
+    lLeg.castShadow = true;
+    const rLeg = new THREE.Mesh(legGeo, slateArmor);
+    rLeg.position.set(0.1, 0.12, 0);
+    rLeg.castShadow = true;
+
+    const torso = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.38, 0.22), slateArmor);
+    torso.position.y = 0.43;
+    torso.castShadow = true;
+
+    const helm = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.26, 0.24), slateArmor);
+    helm.position.y = 0.76;
+    helm.castShadow = true;
+
+    // Prominent front shield
+    const shield = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.54, 0.42), slateArmor);
+    shield.position.set(-0.24, 0.42, 0.14);
+    shield.castShadow = true;
+    const shieldBoss = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.16, 0.16), steelTrim);
+    shieldBoss.position.set(-0.24, 0.42, 0.14);
+
+    const weaponPivot = new THREE.Group();
+    weaponPivot.position.set(0.24, 0.42, 0.08);
+    weaponPivot.rotation.x = Math.PI / 5;
+    const sword = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.46, 0.08), steelTrim);
+    sword.position.y = 0.23;
+    sword.castShadow = true;
+    weaponPivot.add(sword);
+
+    bodyGroup.add(lLeg, rLeg, torso, helm, shield, shieldBoss, weaponPivot);
+    return weaponPivot;
+  }
+
+  private buildNecromancerAcolyte(
+    bodyGroup: THREE.Group,
+    flash: THREE.MeshStandardMaterial[]
+  ): THREE.Group {
+    const darkTeal = new THREE.MeshStandardMaterial({ color: 0x064e3b, roughness: 0.85 });
+    const emeraldTrim = new THREE.MeshStandardMaterial({ color: 0x10b981, roughness: 0.6 });
+    const staffWood = new THREE.MeshStandardMaterial({ color: 0x292524, roughness: 0.9 });
+    const emeraldCrystal = new THREE.MeshStandardMaterial({
+      color: 0x34d399,
+      emissive: 0x059669,
+      emissiveIntensity: 0.65,
+      roughness: 0.25,
+    });
+    flash.push(darkTeal, emeraldTrim, staffWood, emeraldCrystal);
+
+    const robe = new THREE.Mesh(new THREE.ConeGeometry(0.27, 0.66, 8), darkTeal);
+    robe.position.y = 0.33;
+    robe.castShadow = true;
+
+    const mantle = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.23, 0.16, 8), emeraldTrim);
+    mantle.position.y = 0.56;
+    mantle.castShadow = true;
+
+    const hood = new THREE.Mesh(new THREE.ConeGeometry(0.18, 0.28, 6), darkTeal);
+    hood.position.y = 0.77;
+    hood.castShadow = true;
+
+    const weaponPivot = new THREE.Group();
+    weaponPivot.position.set(0.25, 0.42, 0.08);
+    weaponPivot.rotation.x = Math.PI / 8;
+
+    const staff = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.8, 6), staffWood);
+    staff.position.y = 0.33;
+    staff.castShadow = true;
+
+    const crystal = new THREE.Mesh(new THREE.OctahedronGeometry(0.11, 0), emeraldCrystal);
+    crystal.position.y = 0.78;
+    weaponPivot.add(staff, crystal);
+
+    bodyGroup.add(robe, mantle, hood, weaponPivot);
+    return weaponPivot;
+  }
+
+  private buildAshenGuardian(
+    bodyGroup: THREE.Group,
+    flash: THREE.MeshStandardMaterial[]
+  ): THREE.Group {
+    const charcoalArmor = new THREE.MeshStandardMaterial({ color: 0x27272a, roughness: 0.45, metalness: 0.6 });
+    const crimsonArmor = new THREE.MeshStandardMaterial({ color: 0x7f1d1d, roughness: 0.5, metalness: 0.45 });
+    const emberMat = new THREE.MeshStandardMaterial({
+      color: 0xf97316,
+      emissive: 0xdc2626,
+      emissiveIntensity: 0.8,
+      roughness: 0.3,
+    });
+    flash.push(charcoalArmor, crimsonArmor, emberMat);
+
+    // ~1.4x maior que unidades padrão
+    bodyGroup.scale.setScalar(1.4);
+
+    const legGeo = new THREE.BoxGeometry(0.15, 0.26, 0.16);
+    const lLeg = new THREE.Mesh(legGeo, charcoalArmor);
+    lLeg.position.set(-0.12, 0.13, 0);
+    lLeg.castShadow = true;
+    const rLeg = new THREE.Mesh(legGeo, charcoalArmor);
+    rLeg.position.set(0.12, 0.13, 0);
+    rLeg.castShadow = true;
+
+    const torso = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.44, 0.28), charcoalArmor);
+    torso.position.y = 0.48;
+    torso.castShadow = true;
+
+    const chestEmber = new THREE.Mesh(new THREE.OctahedronGeometry(0.1, 0), emberMat);
+    chestEmber.position.set(0, 0.5, 0.15);
+
+    const lPauldron = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.16, 0.26), crimsonArmor);
+    lPauldron.position.set(-0.3, 0.66, 0);
+    lPauldron.castShadow = true;
+    const rPauldron = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.16, 0.26), crimsonArmor);
+    rPauldron.position.set(0.3, 0.66, 0);
+    rPauldron.castShadow = true;
+
+    const helm = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.3, 0.28), charcoalArmor);
+    helm.position.y = 0.84;
+    helm.castShadow = true;
+
+    // Coroa de brasas
+    const crown = new THREE.Mesh(new THREE.ConeGeometry(0.16, 0.22, 6), emberMat);
+    crown.position.y = 1.04;
+
+    const weaponPivot = new THREE.Group();
+    weaponPivot.position.set(0.32, 0.48, 0.1);
+    weaponPivot.rotation.x = Math.PI / 5;
+    const greatsword = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.68, 0.12), crimsonArmor);
+    greatsword.position.y = 0.34;
+    greatsword.castShadow = true;
+    const bladeEdge = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.52, 0.04), emberMat);
+    bladeEdge.position.set(0, 0.42, 0.07);
+    weaponPivot.add(greatsword, bladeEdge);
+
+    bodyGroup.add(
+      lLeg,
+      rLeg,
+      torso,
+      chestEmber,
+      lPauldron,
+      rPauldron,
+      helm,
+      crown,
+      weaponPivot
+    );
     return weaponPivot;
   }
 }

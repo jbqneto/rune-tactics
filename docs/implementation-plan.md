@@ -450,3 +450,127 @@ Aceite: a prévia mostrada no hover é o caminho que a unidade faz ao clicar; at
 - **Vazamento ao reconstruir o tabuleiro.** `buildBoard` hoje remove as malhas sem liberar geometrias e materiais.
 - **Testes que dependem das posições padrão.** Os que usam a batalha padrão sem cenário explícito passam a depender da semente e precisam fixá-la.
 - **Eventos de habilidade fora de ordem.** O agrupamento da animação supõe que os eventos de uma habilidade chegam juntos e contíguos. Se o motor mudar isso, a animação quebra em silêncio; por isso a garantia entra no contrato e em um teste.
+
+---
+
+# Plano de implementação — V4 (The Ashen Campaign)
+
+## Estado e Limites
+
+A **Entrega 1 (Arquitetura e Balanceamento)** define as especificações técnicas da V4 nos documentos `attribute-system.md`, `combat-system.md`, `campaign-design.md`, `enemy-design.md`, `balance-config.md` e na seção V4 de `architecture.md`. Nenhum código em `src/` foi alterado na Entrega 1.
+
+As entregas abaixo (**Entregas 2 a 7**) seguem ordem incremental: cada entrega deve deixar `npm run typecheck`, `npm test` e `npm run build` verdes antes de avançar para a próxima.
+
+## Ordem e Dependências
+
+```
+Entrega 2 (Atributos + Dano + Defender)
+   │
+   ├──▶ Entrega 3 (Novos Inimigos + IA + PendingAttack + Chefe 2 Fases)
+   │       │
+   │       └──▶ Entrega 5 (Renderização 3D V4: Modelos, Água/Pontes, Telegráfe, Aura)
+   │               │
+   └──▶ Entrega 4 (Mapas Novos + Campanha 5 Fases + Checkpoint + SaveSystem)
+                   │
+                   └──▶ Entrega 6 (HUD Campanha + Acampamento/Evolução + main.ts)
+                           │
+                           └──▶ Entrega 7 (QA End-to-End, Simulação e Reconciliação)
+```
+
+*(Nota: Entregas 3 e 4 dependem dos tipos/fórmulas da Entrega 2 e podem evoluir em sequência curta ou com coordenação de editor único em `src/shared/types.ts` e `src/config/gameConfig.ts`.)*
+
+---
+
+## Entrega 2 — Núcleo de Atributos, Fórmula de Dano e Unificação de Defender
+
+**Escopo permitido**: `src/shared/types.ts`, `src/config/gameConfig.ts`, `src/game/attributes/AttributeSystem.ts` (novo), `src/game/combat/CombatSystem.ts`, `src/game/entities/UnitFactory.ts`, `src/game/turns/TurnSystem.ts`, `src/game/GameEngine.ts` e testes em `tests/`. *(Ajuste mínimo em `HudManager.ts`, `UnitRenderer.ts` e `main.ts` apenas se remoção de `shield` quebrar `typecheck`, ou manter compatibilidade temporária declarada até Entrega 5/6.)*
+
+### Tarefas
+- [x] **2.1 Contratos e config**: adicionar `AttributeKey`, `UnitAttributes`, `AttackKind`, `MIN_ATTRIBUTE = 1`, `MAX_ATTRIBUTE = 12`, `attributes`, `baseHp`, `baseArmor`, `basePower`, `attackKind` e `armor` em `UnitState` e `UNIT_STATS`, conforme `docs/balance-config.md`. Atualizar `SKILLS` com `attackKind` explícito e valores V4 (`runic-strike: 4`, `marked-shot: 3`, `arcane-burst: 2`, `healing-light: 3`).
+- [x] **2.2 `AttributeSystem.ts`**: implementar `offensiveBonus`, `calcMaxHp`, `fortitudeResistance`, `getAttributeForAttack` e `applyAttributePoint` (incluindo regra exata de aumento de `FORT` sem curar dano prévio).
+- [x] **2.3 Fórmula de dano e cura no `CombatSystem.ts`**: implementar `computeDamage` centralizada (`attackPower - totalDefense` com mínimo 1, reduzido por `Math.ceil(damageBeforeGuard * 0.5)` quando `isGuarding`), e atualizar cura de `resolveSkill` para `skill.heal + offensiveBonus(caster.attributes.int)`.
+- [x] **2.4 Unificar `defend()`**: remover `GUARD_SHIELD` / `SHIELD_WALL_BONUS` / escudo acumulativo, fazendo `defend()` ativar `isGuarding = true` com mitigação de 50% até o início da próxima ativação da unidade (e funcionando antes ou depois de mover).
+- [x] **2.5 Atualizar testes**: criar `tests/attributes.test.ts` (fórmulas, limites, regra de `FORT`), atualizar `tests/defend.test.ts` para a postura de 50% e validar `tests/combat-turns.test.ts` com os novos stats iniciais.
+
+### Critérios de Aceite
+- `npm run typecheck` e `npm test` 100% verdes.
+- Todos os cálculos de dano (básico e habilidade) e cura passam por `AttributeSystem` + `CombatSystem` sem duplicação.
+- `defend()` reduz dano pela metade arredondado para cima com piso 1, dura até a próxima ativação da própria unidade e funciona antes ou depois de mover.
+
+---
+
+## Entrega 3 — Novos Inimigos, IA Determinística, Ataques Anunciados e Chefe
+
+**Escopo permitido**: `src/shared/types.ts`, `src/config/gameConfig.ts`, `src/game/combat/CombatSystem.ts`, `src/game/turns/TurnSystem.ts`, `src/game/ai/EnemyAI.ts`, `src/game/entities/UnitFactory.ts`, `src/game/GameEngine.ts`, `tests/`.
+
+### Tarefas
+- [x] **3.1 Novos tipos e habilidades**: adicionar `goblin-stalker`, `skeleton-shieldbearer`, `necromancer-acolyte`, `ashen-guardian` e habilidade `dark-mend` em `types.ts` e `gameConfig.ts` seguindo `docs/balance-config.md`.
+- [x] **3.2 `PendingAttack` e ciclo no motor**: adicionar `pendingAttacks` em `GameStateSnapshot`, eventos `attackPrepared`, `pendingAttackResolved` e `attackCancelled`, cancelamento imediato na morte do conjurador e resolução automática no início da próxima ativação do conjurador vivo antes da checagem de `checkBattleEnd`.
+- [x] **3.3 Chefe `ashen-guardian` (2 Fases)**: adicionar `bossPhase: 1 | 2`, gatilho irreversível em `hp <= Math.floor(maxHp * 0.5)` sem restaurar HP, ganho de `+1 moveRange` (`2 -> 3`) e evento `bossPhaseChanged`.
+- [x] **3.4 IA Determinística (`EnemyAI.ts`)**: implementar as árvores determinísticas de `goblin-stalker`, `skeleton-shieldbearer` (incluindo `defend`), `necromancer-acolyte` (cura `dark-mend` + magia à distância) e `ashen-guardian` (`Golpe das Cinzas` em cruz na Fase 1 e `Erupção das Cinzas` 3×3 na Fase 2 + ataques corpo a corpo).
+- [x] **3.5 Testes em `tests/`**: cobrir IA dos 3 novos inimigos, preparação/cancelamento/resolução de `PendingAttack`, mitigação com `Defend` contra `PendingAttack` e transição Fase 1 → Fase 2 do chefe sem restaurar HP.
+
+### Critérios de Aceite
+- `npm run typecheck` e `npm test` 100% verdes.
+- `PendingAttack` morto antes do turno é cancelado sem causar dano; vivo resolve no início da sua próxima ativação e respeita `isGuarding`.
+- Chefe entra em Fase 2 exatamente ao atingir `<= 50%` HP, não restaura HP e expande o ataque anunciado para `3×3`.
+
+---
+
+## Entrega 4 — Mapas Novos, Campanha de 5 Fases, Checkpoint e `SaveSystem`
+
+**Escopo permitido**: `src/shared/types.ts`, `src/config/gameConfig.ts`, `src/game/maps/MapSystem.ts`, `src/game/GameEngine.ts`, `src/game/campaign/CampaignSystem.ts` (novo), `src/game/campaign/SaveSystem.ts` (novo), `tests/`.
+
+### Tarefas
+- [x] **4.1 Mapas `forgotten-swamp` e `corrupted-sanctuary`**: adicionar `ObstacleKind` `'water'` (`blocksLos: false`), `bridgeCells` visuais e os dois mapas em `MAPS`, atualizando `GameSetup` para aceitar overrides de atributos/HP de campanha e `mode` / `stageNumber` / `stageName`.
+- [x] **4.2 `CAMPAIGN_STAGES`**: cadastrar as 5 fases exatas de `docs/campaign-design.md` em `gameConfig.ts`.
+- [x] **4.3 `CampaignSystem.ts`**: implementar início de nova campanha, geração de `GameSetup` por fase, recuperação pós-vitória (`+35%` vivos ceil / revive `25%` ceil), concessão de `+1` ponto por herói, alocação de atributos (`FORT` sem curar dano prévio), checkpoint no início de cada fase e reinício de fase via checkpoint.
+- [x] **4.4 `SaveSystem.ts`**: implementar persistência em `StorageAdapter` sob a chave `'rune_tactics_v4_save'` (`version: 4`), com validação estrita e recuperação segura contra saves inválidos/corrompidos.
+- [x] **4.5 Testes em `tests/`**: validar conectividade BFS e spawns de todos os mapas (`MAPS`), sequência das 5 fases, recuperação/revive, checkpoint/reinício na derrota, alocação de `FORT` e serialização/validação do `SaveSystem` com `StorageAdapter` em memória. Preservar todos os testes de Batalha Rápida.
+
+### Critérios de Aceite
+- `npm run typecheck` e `npm test` 100% verdes.
+- Simulação completa das 5 fases da campanha e do modo Batalha Rápida funcionando em testes Node sem DOM.
+
+---
+
+## Entrega 5 — Renderização 3D V4
+
+**Escopo permitido**: `src/rendering/CharacterVisualController.ts`, `src/rendering/UnitRenderer.ts`, `src/rendering/BoardRenderer.ts`, `public/assets/portraits/` (retratos dos 4 novos inimigos se aplicável).
+
+### Tarefas
+- [x] **5.1 Modelos KayKit e Fallback**: registrar `goblin-stalker`, `skeleton-shieldbearer`, `necromancer-acolyte` e `ashen-guardian` em `MODEL_SPECS` com os `.glb`, `targetHeight` e `tintHex`/`tintStrength` de `docs/enemy-design.md`, além de fallback procedural correspondente e destaque visual para a Fase 2 do chefe (`bossPhase === 2`).
+- [x] **5.2 Terreno dos novos mapas**: renderizar obstáculos `'water'` (água pantanosa translúcida) e `bridgeCells` (tábuas de ponte) em `forgotten-swamp`, e tema visual sombrio/brasas em `corrupted-sanctuary` (com `dispose` adequado no `buildBoard`).
+- [x] **5.3 Telegráfe de `PendingAttack` e Defesa**: adicionar camada visual de células perigosas (`dangerCells`) no `BoardRenderer`, animação composta em `UnitRenderer` para `pendingAttackResolved` (explosão das cinzas em cruz/3×3), efeito de `dark-mend` e aura de defesa guiada por `unit.isGuarding`.
+
+### Critérios de Aceite
+- `npm run typecheck`, `npm test` e `npm run build` verdes.
+- Todos os novos inimigos, chefe em tamanho ~1.4x, pontes sobre água, aura de defesa e células perigosas legíveis em câmera de 360°.
+
+---
+
+## Entrega 6 — Interface HUD de Campanha, Evolução e Integração em `main.ts`
+
+**Escopo permitido**: `src/ui/`, `src/style.css`, `src/main.ts` (sem importar `src/game/` em `src/ui/`, exceto via contratos/callbacks injetados por `main.ts`!).
+
+### Tarefas
+- [x] **6.1 Seletor de Modo**: tela/overlay inicial oferecendo **Nova Campanha**, **Continuar Campanha** (habilitado se `SaveSystem` encontrar save válido) e **Batalha Rápida**, além de acesso limpo para alternar modo.
+- [x] **6.2 HUD de Batalha V4**: mostrar `Fase X/5 — Nome` no painel de partida, atributos (`STR`, `DEX`, `INT`, `FORT`, `DEF`) e badge de `Defesa (-50%)` no card da unidade, indicador de fase do chefe (`Fase 2: Fúria das Cinzas`), feedback de combate para `attackPrepared`, `pendingAttackResolved`, `attackCancelled`, `bossPhaseChanged` e postura defensiva unificada.
+- [x] **6.3 Tela de Acampamento / Evolução**: overlay entre fases mostrando HP recuperado/revivido, pontos disponíveis por herói, botões `+` nos 4 atributos com prévia clara do efeito (`+ATK`, `+MaxHP`, `+DEF`) e botão **"Iniciar Fase N+1"**.
+- [x] **6.4 Derrota, Checkpoint e Vitória Final**: na derrota em campanha, oferecer **"Reiniciar fase (Checkpoint)"** e **"Nova campanha"**; na vitória da Fase 5, exibir modal de **Vitória da Campanha**.
+- [x] **6.5 Ligação em `main.ts`**: conectar `CampaignSystem`, `SaveSystem` (`window.localStorage`), `GameEngine`, `BoardRenderer`, `UnitRenderer` e `HudManager`.
+
+### Critérios de Aceite
+- `npm run typecheck`, `npm test` e `npm run build` verdes.
+- Zero violações de camada (`src/ui/`, `src/rendering/`, `src/input/` sem importações de `src/game/`).
+
+---
+
+## Entrega 7 — QA Integrado, Simulação e Reconciliação Documental
+
+**Escopo permitido**: `tests/`, inspeção visual no navegador e atualização final de `docs/` para refletir o entregue.
+
+### Tarefas
+- [ ] **7.1 Gates automatizados**: executar `npm run typecheck`, `npm test` e `npm run build` garantindo zero erros ou testes ignorados.
+- [ ] **7.2 QA manual no navegador**: validar o fluxo completo de Campanha (Fases 1 → 5, incluindo derrota + Reiniciar fase pelo checkpoint, reload da página em `in_stage` e `between_stages`, upgrade de `FORT`, Fase 2 do chefe e `PendingAttack`) e Batalha Rápida (sorteio de mapas e spawns sem interferir no save da campanha).
+- [ ] **7.3 Reconciliação**: confirmar que os documentos em `docs/` refletem exatamente o código entregue e registrar eventuais ajustes de balanceamento finais.

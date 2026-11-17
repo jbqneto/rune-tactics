@@ -10,6 +10,11 @@ export interface GridCoord {
 
 export type Team = 'player' | 'enemy';
 
+export type AttributeKey = 'str' | 'dex' | 'int' | 'fort';
+export type UnitAttributes = Record<AttributeKey, number>;
+export type AttackKind = 'melee' | 'ranged' | 'magic';
+export type GameMode = 'quick-battle' | 'campaign';
+
 export type UnitType =
   | 'knight'
   | 'archer'
@@ -19,13 +24,27 @@ export type UnitType =
   | 'skeleton-archer'
   | 'armored-skeleton'
   | 'goblin-scout'
-  | 'cultist-mage';
+  | 'cultist-mage'
+  | 'goblin-stalker'
+  | 'skeleton-shieldbearer'
+  | 'necromancer-acolyte'
+  | 'ashen-guardian';
 
-export type SkillId = 'runic-strike' | 'marked-shot' | 'arcane-burst' | 'healing-light';
+export type SkillId = 'runic-strike' | 'marked-shot' | 'arcane-burst' | 'healing-light' | 'dark-mend';
 
-export type ObstacleKind = 'wall' | 'pillar' | 'crate' | 'barrel';
+export interface PendingAttack {
+  id: string;
+  casterId: string;
+  skillName: string;
+  targetCells: GridCoord[];
+  basePower: number;
+  attackKind: AttackKind;
+  preparedRound: number;
+}
 
-/** Todo obstáculo bloqueia movimento. Só `wall` e `pillar` bloqueiam linha de visão. */
+export type ObstacleKind = 'wall' | 'pillar' | 'crate' | 'barrel' | 'water';
+
+/** Todo obstáculo bloqueia movimento. Só `wall` e `pillar` bloqueiam linha de visão (`water` não bloqueia). */
 export interface ObstacleDef {
   pos: GridCoord;
   kind: ObstacleKind;
@@ -50,6 +69,10 @@ export interface MapConfig {
   playerSpawnRows: number[];
   /** O mesmo para os inimigos. */
   enemySpawnRows: number[];
+  /** Tema visual opcional do tabuleiro. */
+  theme?: 'ruins' | 'swamp' | 'fortress' | 'catacombs' | 'sanctuary';
+  /** Células visuais de ponte sobre água (não altera regras de caminho). */
+  bridgeCells?: GridCoord[];
 }
 
 /**
@@ -75,7 +98,15 @@ export interface UnitState {
   pos: GridCoord;
   hp: number;
   maxHp: number;
+  attributes: UnitAttributes;
+  baseHp: number;
+  baseArmor: number;
+  basePower: number;
+  attackKind: AttackKind;
+  /** Poder efetivo do ataque básico (`basePower + offensiveBonus(mainAttr)`), derivado para HUD/consulta. */
   damage: number;
+  /** Defesa efetiva (`baseArmor + fortitudeResistance(attributes.fort)`), derivada para HUD/consulta. */
+  armor: number;
   /** Passos ortogonais por ativação. */
   moveRange: number;
   /** Distância de Manhattan máxima até o alvo. Acima de 1, o ataque exige linha de visão. */
@@ -93,6 +124,10 @@ export interface UnitState {
   skillName: string | null;
   /** 0 = pronta. Ao usar, vai para a recarga da habilidade; cai 1 no início de cada rodada. */
   skillCooldown: number;
+  /** Postura defensiva de 50% de mitigação até a próxima ativação da própria unidade. */
+  isGuarding: boolean;
+  /** Fase atual do chefe `ashen-guardian` (1 ou 2). */
+  bossPhase?: 1 | 2;
   /** Caminho do retrato para o HUD, relativo à raiz do site. */
   portraitPath?: string;
 }
@@ -116,13 +151,32 @@ export type GameEvent =
       targetId: string;
       damage: number;
       targetHpRemaining: number;
+      wasGuarded?: boolean;
       isRanged?: boolean;
       skillId?: SkillId;
+      pendingAttackId?: string;
     }
+  /** A unidade assumiu postura defensiva (mitigação de 50% até sua próxima ativação). */
+  | { type: 'unitGuarded'; unitId: string }
   /** Uma habilidade foi lançada. Vem antes do `unitAttacked` ou `unitHealed` de cada unidade em `affectedUnitIds`. */
   | { type: 'skillUsed'; casterId: string; skillId: SkillId; targetCell: GridCoord; affectedUnitIds: string[] }
   /** Cura aplicada. `amount` é o HP de fato recuperado, já limitado por `maxHp`. */
   | { type: 'unitHealed'; casterId: string; targetId: string; amount: number; targetHpAfter: number }
+  /** Um ataque anunciado em área foi preparado e será resolvido na próxima ativação do conjurador. */
+  | { type: 'attackPrepared'; pendingAttack: PendingAttack }
+  /** Um ataque anunciado foi resolvido no início da ativação do conjurador. */
+  | {
+      type: 'pendingAttackResolved';
+      pendingAttackId: string;
+      casterId: string;
+      skillName: string;
+      targetCells: GridCoord[];
+      affectedUnitIds: string[];
+    }
+  /** Um ataque anunciado foi cancelado porque o conjurador morreu antes de sua próxima ativação. */
+  | { type: 'attackCancelled'; pendingAttackId: string; casterId: string; reason: 'caster_died' }
+  /** O chefe `ashen-guardian` entrou na Fase 2 irreversivelmente. */
+  | { type: 'bossPhaseChanged'; unitId: string; phase: 2; newMoveRange: number }
   | { type: 'unitDied'; unitId: string }
   /** Uma unidade começou sua ativação. Para o jogador, sai junto com a primeira ação ou com o passe. */
   | { type: 'activationStarted'; unitId: string; team: Team; round: number }
@@ -146,6 +200,12 @@ export interface SmartActionPlan {
 
 /** Cópia do estado: alterá-la não afeta o motor. */
 export interface GameStateSnapshot {
+  /** Modo da partida atual. */
+  mode: GameMode;
+  /** Número da fase (1..5) quando `mode === 'campaign'`. */
+  stageNumber?: number;
+  /** Nome da fase quando `mode === 'campaign'`. */
+  stageName?: string;
   /** Mapa sorteado para esta batalha. */
   mapId: string;
   mapName: string;
@@ -178,6 +238,8 @@ export interface GameStateSnapshot {
   selectedUnitId: string | null;
   /** `undoMove` seria aceito agora. Ver as condições no método. */
   canUndoMove: boolean;
+  /** Ataques anunciados em área aguardando resolução na próxima ativação do conjurador. */
+  pendingAttacks: PendingAttack[];
   winner: Team | null;
 }
 
@@ -303,6 +365,12 @@ export interface IGameEngine {
   smartUseSkill(targetCell: GridCoord): ActionResult;
 
   /**
+   * Postura defensiva da unidade ativa: consome a ação de ataque e reduz dano recebido em 50%
+   * (arredondado para cima, mínimo 1) até a próxima ativação da própria unidade.
+   */
+  defend(): ActionResult;
+
+  /**
    * Encerra a ativação atual do jogador e passa a vez adiante. O nome é o da versão anterior:
    * não encerra mais o turno do time inteiro.
    * - Em `player_unit_active`: encerra a ativação da unidade ativa, mesmo com ações sobrando.
@@ -328,4 +396,55 @@ export interface IGameEngine {
 
   /** Devolve os eventos acumulados desde a última chamada e esvazia a fila. */
   consumeEvents(): GameEvent[];
+}
+
+// ---------------------------------------------------------------------------
+// Contratos de Campanha e Persistência (V4)
+// ---------------------------------------------------------------------------
+
+export interface StageUnitSpawn {
+  id: string;
+  type: UnitType;
+  pos: GridCoord;
+}
+
+export interface StageConfig {
+  stageNumber: number;
+  id: string;
+  name: string;
+  subtitle: string;
+  mapId: string;
+  isBossStage: boolean;
+  heroSpawns: StageUnitSpawn[];
+  enemies: StageUnitSpawn[];
+}
+
+export interface CampaignHeroProgress {
+  id: string;
+  type: 'knight' | 'archer' | 'mage' | 'cleric';
+  attributes: UnitAttributes;
+  hp: number;
+  maxHp: number;
+  unspentPoints: number;
+}
+
+export interface CampaignCheckpoint {
+  stageNumber: number;
+  heroes: CampaignHeroProgress[];
+}
+
+export type CampaignStatus = 'in_stage' | 'between_stages' | 'completed';
+
+export interface CampaignState {
+  version: 4;
+  status: CampaignStatus;
+  currentStage: number;
+  heroes: CampaignHeroProgress[];
+  checkpoint: CampaignCheckpoint;
+}
+
+export interface StorageAdapter {
+  getItem(key: string): string | null;
+  setItem(key: string, value: string): void;
+  removeItem(key: string): void;
 }
