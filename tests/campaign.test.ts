@@ -55,8 +55,8 @@ function makeVictorySnapshot(
   };
 }
 
-describe('V4: Mapas Novos e Fases da Campanha', () => {
-  it('water em forgotten-swamp bloqueia movimento mas não bloqueia linha de visão', () => {
+describe('V4: New Maps and Campaign Stages', () => {
+  it('water in forgotten-swamp blocks movement but does not block line of sight', () => {
     const swamp = MAPS.find((m) => m.id === 'forgotten-swamp')!;
     expect(swamp).toBeDefined();
     expect(swamp.theme).toBe('swamp');
@@ -67,15 +67,15 @@ describe('V4: Mapas Novos e Fases da Campanha', () => {
     expect(waterCells.every((w) => w.blocksLos === false)).toBe(true);
 
     const grid = new GridSystem(swamp.gridSize, swamp.obstacles);
-    // Coluna 0 tem água em (0,5) e (0,6): não pode andar sobre ela, mas tem LoS através dela
+    // Column 0 has water at (0,5) and (0,6): cannot walk on it, but has LoS across it
     expect(grid.isObstacle({ x: 0, y: 5 })).toBe(true);
     expect(grid.hasLineOfSight({ x: 0, y: 4 }, { x: 0, y: 7 })).toBe(true);
-    // Ponte em (2,5) e (2,6) é livre
+    // Bridge at (2,5) and (2,6) is walkable
     expect(grid.isObstacle({ x: 2, y: 5 })).toBe(false);
     expect(grid.isObstacle({ x: 2, y: 6 })).toBe(false);
   });
 
-  it('CAMPAIGN_STAGES define exatamente 5 fases com spawns válidos nos respectivos mapas', () => {
+  it('CAMPAIGN_STAGES defines exactly 5 stages with valid spawns on their respective maps', () => {
     expect(CAMPAIGN_STAGES).toHaveLength(5);
     expect(CAMPAIGN_STAGES.map((s) => s.mapId)).toEqual([
       'ruins',
@@ -117,8 +117,8 @@ describe('V4: Mapas Novos e Fases da Campanha', () => {
   });
 });
 
-describe('V4: CampaignSystem (Fluxo, Recuperação, FORT e Checkpoint)', () => {
-  it('inicia nova campanha, gera GameSetup sem randomização e preserva modo quick-battle', () => {
+describe('V4: CampaignSystem (Flow, Recovery, FORT, and Checkpoint)', () => {
+  it('starts a new campaign, generates GameSetup without randomization, and preserves quick-battle mode', () => {
     const storage = new MemoryStorage();
     const saveSystem = new SaveSystem(storage);
     const campaign = new CampaignSystem(saveSystem);
@@ -136,7 +136,7 @@ describe('V4: CampaignSystem (Fluxo, Recuperação, FORT e Checkpoint)', () => {
 
     expect(snap.mode).toBe('campaign');
     expect(snap.stageNumber).toBe(1);
-    expect(snap.stageName).toBe('Posto Avançado');
+    expect(snap.stageName).toBe('Outpost');
     expect(snap.mapId).toBe('ruins');
     expect(snap.turnOrder).toEqual([
       'knight-1',
@@ -148,14 +148,14 @@ describe('V4: CampaignSystem (Fluxo, Recuperação, FORT e Checkpoint)', () => {
       'mage-1',
     ]);
 
-    // Batalha Rápida continua isolada e sem alterar o save
+    // Quick Battle remains isolated and does not alter the save
     const quick = new GameEngine({ seed: 101 });
     expect(quick.getState().mode).toBe('quick-battle');
     expect(quick.getState().stageNumber).toBeUndefined();
     expect(saveSystem.hasValidSave()).toBe(true);
   });
 
-  it('aplica recuperação pós-vitória (+35% vivos ceil, revive 25% ceil) e concede +1 ponto por herói', () => {
+  it('applies post-victory recovery (+35% survivors ceil, revive 25% ceil) and grants +1 point per hero', () => {
     const campaign = new CampaignSystem();
     const initial = campaign.startNewCampaign();
     const knightMax = initial.heroes.find((h) => h.id === 'knight-1')!.maxHp; // 12
@@ -185,7 +185,7 @@ describe('V4: CampaignSystem (Fluxo, Recuperação, FORT e Checkpoint)', () => {
     expect(after.heroes.every((h) => h.unspentPoints === 1)).toBe(true);
   });
 
-  it('aloca FORT somando apenas o incremento de maxHp ao hp atual e bloqueia avanço com pontos pendentes', () => {
+  it('allocates FORT by adding only the maxHp increment to current hp and blocks advancing with unspent points', () => {
     const campaign = new CampaignSystem();
     campaign.startNewCampaign();
 
@@ -201,11 +201,11 @@ describe('V4: CampaignSystem (Fluxo, Recuperação, FORT e Checkpoint)', () => {
     expect(knightBefore.maxHp).toBe(12);
     expect(knightBefore.attributes.fort).toBe(UNIT_STATS.knight.attributes.fort); // 6
 
-    // Não pode avançar enquanto houver pontos não gastos
+    // Cannot advance while there are unspent points
     expect(campaign.canAdvanceToNextStage()).toBe(false);
     expect(campaign.advanceToNextStage().ok).toBe(false);
 
-    // Investe FORT no knight (+1 fort -> +2 maxHp, +2 hp apenas, sem curar dano prévio)
+    // Invest FORT on knight (+1 fort -> +2 maxHp, +2 hp only, without healing prior damage)
     const allocRes = campaign.allocateHeroAttribute('knight-1', 'fort');
     expect(allocRes.ok).toBe(true);
     if (allocRes.ok) {
@@ -216,7 +216,7 @@ describe('V4: CampaignSystem (Fluxo, Recuperação, FORT e Checkpoint)', () => {
       expect(k.unspentPoints).toBe(0);
     }
 
-    // Aloca os demais heróis e avança para Fase 2
+    // Allocate remaining heroes and advance to Stage 2
     expect(campaign.allocateHeroAttribute('cleric-1', 'int').ok).toBe(true);
     expect(campaign.allocateHeroAttribute('archer-1', 'dex').ok).toBe(true);
     expect(campaign.allocateHeroAttribute('mage-1', 'int').ok).toBe(true);
@@ -229,7 +229,7 @@ describe('V4: CampaignSystem (Fluxo, Recuperação, FORT e Checkpoint)', () => {
       expect(adv.state.status).toBe('in_stage');
       expect(adv.state.checkpoint.stageNumber).toBe(2);
 
-      // GameEngine da Fase 2 recebe HP e atributos evoluídos
+      // Stage 2 GameEngine receives upgraded HP and attributes
       const eng2 = new GameEngine(campaign.createStageGameSetup());
       const kUnit = eng2.getState().units.find((u) => u.id === 'knight-1')!;
       expect(kUnit.maxHp).toBe(14);
@@ -239,13 +239,13 @@ describe('V4: CampaignSystem (Fluxo, Recuperação, FORT e Checkpoint)', () => {
     }
   });
 
-  it('reinicia fase atual restaurando exatamente o checkpoint e conclui campanha na Fase 5', () => {
+  it('restarts current stage restoring exact checkpoint and completes campaign on Stage 5', () => {
     const storage = new MemoryStorage();
     const saveSystem = new SaveSystem(storage);
     const campaign = new CampaignSystem(saveSystem);
     campaign.startNewCampaign();
 
-    // Simula avanço até a Fase 5
+    // Simulate advancing to Stage 5
     for (let stage = 1; stage <= 4; stage++) {
       campaign.completeStage(makeVictorySnapshot(stage, {}));
       for (const id of ['knight-1', 'cleric-1', 'archer-1', 'mage-1']) {
@@ -259,13 +259,13 @@ describe('V4: CampaignSystem (Fluxo, Recuperação, FORT e Checkpoint)', () => {
     expect(stage5State.checkpoint.stageNumber).toBe(5);
     const checkpointStr = stage5State.checkpoint.heroes.find((h) => h.id === 'knight-1')!.attributes.str;
 
-    // Reiniciar fase 5 restaura exatamente o checkpoint da fase 5
+    // Restarting stage 5 restores exact stage 5 checkpoint
     const restarted = campaign.restartCurrentStage();
     expect(restarted.currentStage).toBe(5);
     expect(restarted.status).toBe('in_stage');
     expect(restarted.heroes.find((h) => h.id === 'knight-1')!.attributes.str).toBe(checkpointStr);
 
-    // Vencer a fase 5 conclui a campanha
+    // Winning stage 5 completes the campaign
     const completed = campaign.completeStage(
       makeVictorySnapshot(5, {
         'knight-1': { hp: 3, alive: true },
@@ -278,8 +278,8 @@ describe('V4: CampaignSystem (Fluxo, Recuperação, FORT e Checkpoint)', () => {
   });
 });
 
-describe('V4: SaveSystem (Persistência Versionada e Validação Estrita)', () => {
-  it('salva e carrega estado válido em StorageAdapter e limpa corretamente', () => {
+describe('V4: SaveSystem (Versioned Persistence and Strict Validation)', () => {
+  it('saves and loads valid state in StorageAdapter and clears properly', () => {
     const storage = new MemoryStorage();
     const saveSystem = new SaveSystem(storage);
     const campaign = new CampaignSystem(saveSystem);
@@ -296,41 +296,41 @@ describe('V4: SaveSystem (Persistência Versionada e Validação Estrita)', () =
     expect(saveSystem.hasValidSave()).toBe(false);
   });
 
-  it('rejeita saves corrompidos, versão incompatível ou invariantes violadas', () => {
+  it('rejects corrupted saves, incompatible version, or violated invariants', () => {
     const storage = new MemoryStorage();
     const saveSystem = new SaveSystem(storage);
     const campaign = new CampaignSystem(saveSystem);
     const valid = campaign.startNewCampaign();
 
-    // JSON malformado
+    // Malformed JSON
     storage.setItem(CAMPAIGN_SAVE_KEY, '{invalid-json');
     expect(saveSystem.load()).toBeNull();
 
-    // Versão incompatível
+    // Incompatible version
     storage.setItem(CAMPAIGN_SAVE_KEY, JSON.stringify({ ...valid, version: 3 }));
     expect(saveSystem.load()).toBeNull();
 
-    // currentStage fora de 1..5
+    // currentStage outside 1..5
     storage.setItem(
       CAMPAIGN_SAVE_KEY,
       JSON.stringify({ ...valid, currentStage: 6, checkpoint: { ...valid.checkpoint, stageNumber: 6 } }),
     );
     expect(saveSystem.load()).toBeNull();
 
-    // Herói ausente
+    // Missing hero
     storage.setItem(
       CAMPAIGN_SAVE_KEY,
       JSON.stringify({ ...valid, heroes: valid.heroes.slice(0, 3) }),
     );
     expect(saveSystem.load()).toBeNull();
 
-    // Atributo fora de [1, 12]
+    // Attribute outside [1, 12]
     const badAttr = structuredClone(valid);
     badAttr.heroes[0].attributes.str = 13;
     storage.setItem(CAMPAIGN_SAVE_KEY, JSON.stringify(badAttr));
     expect(saveSystem.load()).toBeNull();
 
-    // HP <= 0 em in_stage
+    // HP <= 0 in in_stage
     const zeroHp = structuredClone(valid);
     zeroHp.heroes[0].hp = 0;
     storage.setItem(CAMPAIGN_SAVE_KEY, JSON.stringify(zeroHp));

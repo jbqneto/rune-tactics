@@ -69,8 +69,8 @@ export type CampaignActionResult =
   | { ok: false; reason: string };
 
 /**
- * Máquina de estado da campanha de 5 fases: inicialização, geração de `GameSetup`,
- * recuperação pós-vitória, evolução de atributos, checkpoint e reinício de fase.
+ * 5-stage campaign state machine: initialization, `GameSetup` generation,
+ * post-victory recovery, attribute progression, checkpointing, and stage restart.
  */
 export class CampaignSystem {
   private state: CampaignState | null = null;
@@ -109,7 +109,7 @@ export class CampaignSystem {
     const state = this.requireState();
     const stage = CAMPAIGN_STAGES.find((s) => s.stageNumber === state.currentStage);
     if (!stage) {
-      throw new Error(`Fase inválida na campanha: ${state.currentStage}`);
+      throw new Error(`Invalid campaign stage: ${state.currentStage}`);
     }
     return stage;
   }
@@ -148,14 +148,14 @@ export class CampaignSystem {
   completeStage(snapshot: GameStateSnapshot): CampaignState {
     const state = this.requireState();
     if (state.status !== 'in_stage') {
-      throw new Error('Só é possível concluir uma fase quando status === "in_stage".');
+      throw new Error('Can only complete a stage when status === "in_stage".');
     }
     if (snapshot.winner !== 'player') {
-      throw new Error('A fase só pode ser concluída após vitória do jogador.');
+      throw new Error('Stage can only be completed after a player victory.');
     }
     if (snapshot.stageNumber !== undefined && snapshot.stageNumber !== state.currentStage) {
       throw new Error(
-        `Snapshot da fase ${snapshot.stageNumber} não corresponde à fase atual ${state.currentStage}.`,
+        `Snapshot stage ${snapshot.stageNumber} does not match current stage ${state.currentStage}.`,
       );
     }
 
@@ -164,7 +164,7 @@ export class CampaignSystem {
     state.heroes = state.heroes.map((hero) => {
       const unit = snapshot.units.find((u) => u.id === hero.id);
       if (!unit) {
-        throw new Error(`Herói ${hero.id} ausente no snapshot da batalha.`);
+        throw new Error(`Hero ${hero.id} missing from battle snapshot.`);
       }
 
       if (isFinalStage) {
@@ -192,15 +192,15 @@ export class CampaignSystem {
 
   allocateHeroAttribute(heroId: string, attr: AttributeKey): CampaignActionResult {
     if (!this.state) {
-      return { ok: false, reason: 'Nenhuma campanha ativa.' };
+      return { ok: false, reason: 'No active campaign.' };
     }
     if (this.state.status !== 'between_stages') {
-      return { ok: false, reason: 'Atributos só podem ser alocados entre fases.' };
+      return { ok: false, reason: 'Attributes can only be allocated between stages.' };
     }
 
     const idx = this.state.heroes.findIndex((h) => h.id === heroId);
     if (idx === -1) {
-      return { ok: false, reason: `Herói não encontrado: ${heroId}` };
+      return { ok: false, reason: `Hero not found: ${heroId}` };
     }
 
     const hero = this.state.heroes[idx];
@@ -243,18 +243,18 @@ export class CampaignSystem {
 
   advanceToNextStage(): CampaignActionResult {
     if (!this.state) {
-      return { ok: false, reason: 'Nenhuma campanha ativa.' };
+      return { ok: false, reason: 'No active campaign.' };
     }
     if (this.state.status !== 'between_stages') {
-      return { ok: false, reason: 'A campanha não está entre fases.' };
+      return { ok: false, reason: 'Campaign is not between stages.' };
     }
     if (this.state.currentStage >= CAMPAIGN_STAGES.length) {
-      return { ok: false, reason: 'A campanha já está na última fase.' };
+      return { ok: false, reason: 'Campaign is already on the final stage.' };
     }
     if (!this.canAdvanceToNextStage()) {
       return {
         ok: false,
-        reason: 'Distribua todos os pontos de atributo pendentes antes de avançar.',
+        reason: 'Spend all pending attribute points before advancing.',
       };
     }
 
@@ -284,7 +284,7 @@ export class CampaignSystem {
 
   private requireState(): CampaignState {
     if (!this.state) {
-      throw new Error('Nenhuma campanha ativa.');
+      throw new Error('No active campaign.');
     }
     return this.state;
   }

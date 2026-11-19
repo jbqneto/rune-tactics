@@ -1,105 +1,105 @@
-# Sistema de turnos — especificação V2.1
+# Turn System — V2.1 Specification
 
-## Status e precedência
+## Status and Precedence
 
-Este documento especifica o comportamento-alvo solicitado no brief V2.1, não uma implementação concluída. O diagnóstico refere-se à leitura inicial; outros agentes alteraram src/tests durante esta tarefa, exigindo reconciliação posterior à integração. A inspeção encontrou ativações individuais com escolha manual antes da primeira ação, já implementadas em `TurnSystem` e `GameEngine`. A antiga indicação de que todo o time ainda agia junto estava desatualizada.
+This document specifies the target behavior requested in the V2.1 brief, not a completed implementation. The diagnosis refers to the initial code reading; other agents modified `src`/`tests` during this task, requiring post-integration reconciliation. Inspection found individual activations with manual choice before the first action already implemented in `TurnSystem` and `GameEngine`. The older note stating that the whole team still acted together was outdated.
 
-`AGENTS.md` e `game-design.md` chamam a base atual de V2.2 e descrevem escolha livre e cadáveres dos dois times. O brief V2.1 exige ordem fixa e desaparecimento visual dos inimigos. Para esta migração, os requisitos abaixo são o alvo explícito; a numeração não demonstra o estado de implementação. Os demais documentos não foram alterados fora do escopo.
+`AGENTS.md` and `game-design.md` refer to the current baseline as V2.2 and describe free selection and corpses for both teams. The V2.1 brief requires fixed order and visual disappearance of enemies. For this migration, the requirements below are the explicit target; numbering does not indicate implementation status. Other documents were not altered outside scope.
 
-## Ordem fixa antes da partida
+## Fixed Pre-Match Order
 
-A sequência padrão é definida na configuração antes de iniciar/resetar a batalha, nunca por clique, velocidade, proximidade ou reordenação após mortes:
+The default sequence is defined in configuration before starting/resetting a battle, never by click order, speed, proximity, or re-sorting after deaths:
 
-| Posição | Unidade | ID |
+| Slot | Unit | ID |
 |---|---|---|
-| 1 | Guerreiro | `knight-1` |
+| 1 | Knight | `knight-1` |
 | 2 | Goblin Scout | `goblin-scout-1` |
-| 3 | Arqueira | `archer-1` |
+| 3 | Archer | `archer-1` |
 | 4 | Melee Skeleton 1 | `melee-skeleton-1` |
-| 5 | Mago | `mage-1` |
+| 5 | Mage | `mage-1` |
 | 6 | Melee Skeleton 2 | `melee-skeleton-2` |
-| 7 | Clérigo | `cleric-1` |
+| 7 | Cleric | `cleric-1` |
 | 8 | Armored Skeleton | `armored-skeleton-1` |
 | 9 | Skeleton Archer | `skeleton-archer-1` |
 | 10 | Cultist Mage | `cultist-mage-1` |
 
-Intercalada não significa alternância obrigatória entre times: as posições 8–10 são inimigas consecutivas. Não usar a ordem bruta atual de `INITIAL_UNITS`, que agrupa os quatro heróis antes dos inimigos. Manter a sequência em `gameConfig.ts` como fonte única, com contrato aprovado pelo coordenador.
+Interleaved does not mean strict team alternation: slots 8–10 are consecutive enemies. Do not use the raw order of `INITIAL_UNITS`, which groups all four heroes before enemies. Keep the sequence in `gameConfig.ts` as the single source of truth, with a coordinator-approved contract.
 
-## Estrutura TurnScheduler (proposta, não exportada hoje)
+## TurnScheduler Structure (proposed, not currently exported)
 
-| Campo | Tipo | Invariante |
+| Field | Type | Invariant |
 |---|---|---|
-| `turnOrder` | `string[]` | Cópia da ordem inicial, estável durante toda a partida |
-| `currentIndex` | `number` | Índice na lista original, não em uma lista filtrada de vivos |
-| `round` | `number` | Começa em 1; incrementa uma vez por travessia completa |
-| `activeUnitId` | `string \| null` | ID vivo em `turnOrder[currentIndex]`, ou null em estado terminal |
-| `hasMoved` | `boolean` | Movimento consumido da unidade ativa |
-| `hasAttacked` | `boolean` | Ataque básico OU habilidade consumido da unidade ativa |
+| `turnOrder` | `string[]` | Copy of the initial order, stable throughout the match |
+| `currentIndex` | `number` | Index into the original list, not into a filtered living-only list |
+| `round` | `number` | Starts at 1; increments once per full traversal |
+| `activeUnitId` | `string \| null` | Living ID at `turnOrder[currentIndex]`, or `null` in terminal states |
+| `hasMoved` | `boolean` | Movement consumed by the active unit |
+| `hasAttacked` | `boolean` | Basic attack OR skill consumed by the active unit |
 
-`TurnScheduler` é um modelo de responsabilidade; pode ser implementado dentro do `TurnSystem`, sem exigir arquivo/classe adicional. Os flags já existem em `UnitState`: não criar duas fontes graváveis. Os campos do agendador devem refletir o estado da ativa por acesso derivado, ou ser sincronizados atomicamente com uma única autoridade aprovada. `hasActivatedThisRound` continua útil ao HUD e aos testes, mas não escolhe o próximo ID.
+`TurnScheduler` is a responsibility model; it can be implemented inside `TurnSystem` without requiring an extra file/class. Flags already exist on `UnitState`: do not create two writable sources of truth. Scheduler fields should reflect the active unit's state via derived accessors, or be atomically synchronized under a single approved authority. `hasActivatedThisRound` remains useful for the HUD and tests, but it does not pick the next ID.
 
-### Início, comandos e seleção
+### Start, Commands, and Selection
 
-1. Validar IDs únicos, existência das entradas e cobertura das unidades do cenário. Cenários de teste com outros IDs precisam de ordem própria definida antes do início; não presumir os dez IDs padrão.
-2. Inicializar rodada 1 e buscar a primeira entrada viva; verificar fim de batalha antes de agendar se faltar um time.
-3. Fixar `activeUnitId` imediatamente, antes da primeira ação, e emitir `activationStarted` uma vez. Aliado entra em `player_unit_active`; inimigo, em `enemy_activation`. Não existe janela jogável de `awaiting_player_choice`.
-4. Todo comando de movimento/ataque/habilidade deve validar a identidade ativa no motor, não só no mouse ou HUD. `selectedUnitId` não concede direito de ação.
-5. Na opção mínima, `selectUnit` recusa outro aliado e `null` durante a ativação. Inspeção de outro aliado é opcional e pode ser foco local do HUD; nunca altera `activeUnitId`, índice, flags, eventos ou o autor de comandos. Se houver seleção de inspeção compartilhada, revisar o contrato antes de implementar.
-6. `endPlayerTurn()` encerra apenas a ativação aliada atual, mesmo sem ações. Fora da fase aliada é recusado.
-7. Ação inválida não altera estado, não gasta flags e não emite eventos.
+1. Validate unique IDs, entry existence, and full coverage of scenario units. Test scenarios with custom IDs need their own order defined before start; do not assume the ten default IDs.
+2. Initialize round 1 and locate the first living entry; check for battle end before scheduling if a team is missing.
+3. Lock `activeUnitId` immediately before the first action and emit `activationStarted` once. Allies enter `player_unit_active`; enemies enter `enemy_activation`. There is no playable `awaiting_player_choice` window.
+4. Every move/attack/skill command must validate active unit identity inside the engine, not merely in mouse or HUD code. `selectedUnitId` does not grant action authority.
+5. In the minimal option, `selectUnit` rejects other allies and `null` during an activation. Inspecting another ally is optional and can remain local HUD focus; it must never alter `activeUnitId`, index, flags, events, or command authority. If shared inspection selection is introduced, review the contract before implementing.
+6. `endPlayerTurn()` ends only the current allied activation, even with no actions taken. Outside the allied phase it is rejected.
+7. Invalid actions leave state unchanged, consume no flags, and emit no events.
 
-`activationLocked` deve valer desde o início da ativação aliada, não somente após a primeira ação. `phase` e `activationTeam` derivam da unidade agendada; estados terminais têm `activeUnitId = null`.
+`activationLocked` must hold from the very start of an allied activation, not only after the first action. `phase` and `activationTeam` derive from the scheduled unit; terminal states have `activeUnitId = null`.
 
-## Encerramento automático: cenários A–E
+## Automatic End of Activation: Scenarios A–E
 
-| Cenário | Sequência | Flags após ação | Resultado |
+| Scenario | Sequence | Flags after action | Result |
 |---|---|---|---|
-| A | mover → atacar | true / true | Encerra automaticamente após o ataque |
-| B | atacar → mover | false / true, depois true / true | Mantém a mesma ativa após atacar; encerra após mover |
-| C | apenas mover | true / false | Permanece ativa até atacar/usar habilidade ou encerrar manualmente |
-| D | apenas atacar | false / true | Permanece ativa até mover ou encerrar manualmente |
-| E | nenhuma ação → encerrar | false / false | Passe válido; avança uma posição elegível |
+| A | move → attack | true / true | Automatically ends after the attack |
+| B | attack → move | false / true, then true / true | Keeps same active unit after attack; ends after move |
+| C | move only | true / false | Remains active until attack/skill or manual end |
+| D | attack only | false / true | Remains active until move or manual end |
+| E | no action → end | false / false | Valid pass; advances one eligible slot |
 
-Habilidade, incluindo `Healing Light`, consome `hasAttacked`. Não encerrar automaticamente por ausência de alvo de ataque ou de destino de movimento para o jogador: usar encerramento manual. A IA sem ação possível encerra sua própria ativação para evitar travamento.
+Skills, including `Healing Light`, consume `hasAttacked`. Do not auto-end on lack of attack targets or move destinations for the player: require manual end. AI with no valid actions ends its own activation to prevent deadlocks.
 
-### Checagem pós-ação e eventos
+### Post-Action Checks and Events
 
-1. Aplicar a ação e seus eventos (`unitMoved`, ou `unitAttacked`/`unitDied`, ou `skillUsed` e efeitos).
-2. Verificar vitória/derrota primeiro. O golpe final termina em `battleEnded`, sem nova ativação nem rodada.
-3. Se a ativa morreu ou `hasMoved && hasAttacked`, concluir sua ativação uma vez. Caso contrário, conservar ID e índice.
-4. Ao concluir: marcar `hasActivatedThisRound`, emitir `activationEnded`, avançar o cursor e pular mortos.
-5. Se atravessou o fim da lista: incrementar rodada, restaurar ações/ativação e reduzir recargas dos vivos em 1 com piso 0; emitir `roundStarted` uma única vez.
-6. Fixar próxima unidade viva e emitir `activationStarted`. Manter `turnChanged` para mudança de equipe ou rodada; ele não substitui `activationStarted` em inimigos consecutivos.
+1. Apply the action and its events (`unitMoved`, or `unitAttacked`/`unitDied`, or `skillUsed` and its effects).
+2. Check victory/defeat first. The killing blow ends in `battleEnded`, with no new activation or round.
+3. If the active unit died or `hasMoved && hasAttacked`, finish its activation once. Otherwise, keep ID and index.
+4. On completion: mark `hasActivatedThisRound`, emit `activationEnded`, advance cursor, and skip dead units.
+5. If traversal wrapped past the end of the list: increment round, reset actions/activation flags, and reduce living units' cooldowns by 1 (floor 0); emit `roundStarted` once.
+6. Set next living unit and emit `activationStarted`. Keep `turnChanged` for team or round changes; it does not replace `activationStarted` across consecutive enemies.
 
-A interface anima fatos já aplicados. O motor permanece síncrono; a animação bloqueia comandos externos sem atrasar o estado lógico.
+The UI animates already-applied facts. The engine remains synchronous; animations block external commands without delaying logical state.
 
-## Mortes e passagem de rodada
+## Deaths and Round Wrap
 
-A unidade morta permanece em `units`, com `alive: false`, `hp: 0` e posição da queda. Também mantém sua posição original em `turnOrder`: não remover, compactar, ordenar nem reconstruir a lista.
+A dead unit stays in `units` with `alive: false`, `hp: 0`, and its fall position. It also retains its original slot in `turnOrder`: never remove, compact, sort, or rebuild the list.
 
-O cursor avança sobre entradas mortas sem emitir `activationStarted` para elas. Uma morte antes da vez apenas faz essa entrada ser pulada; uma morte após a vez não devolve ativações. Inimigos desaparecem somente na apresentação; aliados permanecem deitados. Nenhum cadáver bloqueia movimento ou linha de visão, nem pode receber ataque, seleção operacional ou cura.
+The cursor skips dead entries without emitting `activationStarted` for them. Dying before one's turn simply skips that entry; dying after acting grants no extra activations. Enemies disappear in presentation only; allies remain lying on the ground. Corpses never block movement or line of sight, nor can they be attacked, operationally selected, or healed.
 
-Uma rodada corresponde à travessia de toda a ordem original, processando cada vivo no máximo uma vez. Mortos no final da lista também precisam ser atravessados antes da virada. A próxima rodada começa na primeira entrada viva da mesma lista, mesmo se o Guerreiro morreu. Não aumentar a rodada quando apenas o time muda, nem quando a animação acaba.
+One round corresponds to a traversal of the entire original order, processing each living unit at most once. Dead entries at the end of the list must also be traversed before wrapping. The next round begins at the first living entry in the same list, even if the Knight has died. Never increment the round merely because teams changed or an animation finished.
 
-## Casos extremos e proteção
+## Edge Cases and Safeguards
 
-- Mortos no começo, meio e fim: preservar ordem relativa dos sobreviventes e índices originais.
-- Último inimigo/aliado morto: estado terminal imediato, sem avanço ou loop vazio.
-- Ambos os times ausentes em cenário artificial: definir precedência explícita em revisão; a base atual prioriza derrota. Não inventar empate fora do contrato.
-- Ativa morta: concluir e procurar próxima, após checar fim de batalha; hoje não há contra-ataque nem dano de terreno.
-- Todos os slots mortos ou IDs inválidos: busca limitada ao tamanho da lista; nunca usar loop infinito. Rejeitar configuração inválida antes da partida.
-- Comandos duplicados: não assumir que um segundo passe sempre será recusado; após virada pode haver outro aliado vivo consecutivo. UI bloqueia durante animação e o motor valida a ativa corrente. Tokens de ativação seriam extensão de contrato, não implementação implícita.
-- Reset durante animação: cancelar filas/VFX, restaurar flags/visibilidade, cursor e rodada; estabelecer novamente a primeira ativa. Revisar o contrato atual que emite apenas `gameReset` para incluir/sincronizar a ativação inicial sem duplicação.
-- `executeNextEnemyAction()` fora de `enemy_activation` não faz nada. `false` significa nenhum passo executado, não necessariamente fim da fase: inimigos podem ser consecutivos.
+- Dead at start, middle, and end: preserve relative order of survivors and original indices.
+- Last enemy/ally killed: immediate terminal state, with no cursor advance or empty loop.
+- Both teams absent in artificial scenarios: define explicit precedence on review; the current baseline prioritizes defeat. Do not invent a draw outside the contract.
+- Active unit dead: conclude and advance to next after checking battle end; currently there is no counter-attack or terrain damage.
+- All slots dead or invalid IDs: search bounded by list length; never loop infinitely. Reject invalid setup before match start.
+- Duplicate commands: do not assume a second pass is always rejected; after a round wrap there may be another consecutive living ally. UI locks during animations and the engine validates the active unit. Activation tokens would be a contract extension, not an implicit implementation.
+- Reset during animation: cancel queues/VFX, restore flags/visibility, cursor, and round; re-establish the first active unit. Review the current contract that emits only `gameReset` to include/sync initial activation without duplication.
+- `executeNextEnemyAction()` outside `enemy_activation` does nothing. `false` means no step executed, not necessarily end of phase: enemies can act consecutively.
 
-## Estratégia de testes
+## Test Strategy
 
-- Tabela do agendador: ordem exata dos dez IDs por duas rodadas, incluindo as três ativações inimigas finais; verificar unicidade e cursor.
-- Cenários A–E e variantes com habilidade/cura; apenas flags true/true provocam encerramento automático normal.
-- Cliques/`selectUnit` antes e depois da primeira ação, limpeza da seleção e tentativa de comandar não ativa: nunca mudam a ativa nem liberam outra unidade.
-- Mortes em cada posição, múltiplos mortos consecutivos e último slot morto; recarga só cai na virada, nunca por slot pulado.
-- Ordem dos eventos, ação inválida sem efeitos, passe, reset, IA bloqueada e golpe final.
-- Invariantes em simulações limitadas: nenhuma ativa morta, nenhuma repetição na rodada, progresso finito, snapshot isolado e listas estáveis.
-- Preservar regressões de grade, LoS, dano, cura, habilidades e IA; substituir expectativas da escolha livre, não apagar testes sem equivalente.
+- Scheduler table: exact order of all ten IDs across two rounds, including the three final enemy activations; verify uniqueness and cursor position.
+- Scenarios A–E and variants with skill/healing; only `true / true` flags trigger normal auto-end.
+- Clicks/`selectUnit` before and after first action, clearing selection, and attempting to command non-active units: never change the active unit or unlock another unit.
+- Deaths in every slot, multiple consecutive dead units, and last slot dead; cooldown ticks down only on round wrap, never per skipped slot.
+- Event ordering, invalid actions with no side effects, pass, reset, blocked AI, and killing blow.
+- Invariants in bounded simulations: no dead active unit, no duplicate activations per round, finite progress, isolated snapshots, and stable lists.
+- Preserve regressions for grid, LoS, damage, healing, skills, and AI; update expectations from free selection rather than deleting tests without replacement.
 
-Plano de integração e responsáveis: [implementation-plan.md](implementation-plan.md). Diagnóstico da base: [architecture.md](architecture.md).
+Integration plan and owners: [implementation-plan.md](implementation-plan.md). Baseline diagnosis: [architecture.md](architecture.md).

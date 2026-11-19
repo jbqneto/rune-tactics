@@ -9,7 +9,7 @@ interface SearchNode {
   prev: SearchNode | null;
 }
 
-// Ordem fixa dos vizinhos: mantém a busca, e portanto a IA, determinística.
+// Fixed neighbor order: keeps search, and therefore AI, deterministic.
 const STEPS: readonly GridCoord[] = [
   { x: 0, y: 1 },
   { x: 1, y: 0 },
@@ -25,9 +25,9 @@ export function sameCell(a: GridCoord, b: GridCoord): boolean {
   return a.x === b.x && a.y === b.y;
 }
 
-/** O segmento entre os centros de `a` e `b` passa pelo interior da célula `cell`? (recorte de Liang–Barsky) */
+/** Does the segment between the centers of `a` and `b` pass through the interior of `cell`? (Liang-Barsky clipping) */
 function segmentCrossesCell(a: GridCoord, b: GridCoord, cell: GridCoord): boolean {
-  const half = 0.5 - 1e-6; // encolhe a célula para que encostar na borda ou no canto não conte
+  const half = 0.5 - 1e-6; // shrink the cell so grazing an edge or corner does not count
   let enter = 0;
   let exit = 1;
   for (const axis of ['x', 'y'] as const) {
@@ -60,24 +60,24 @@ export class GridSystem {
     return this.obstacles.some((o) => sameCell(o.pos, c));
   }
 
-  /** Só unidades vivas ocupam célula. */
+  /** Only living units occupy a cell. */
   isOccupied(c: GridCoord, units: readonly Occupant[]): boolean {
     return units.some((u) => u.alive && sameCell(u.pos, c));
   }
 
-  /** Fora da grade, obstáculo ou unidade viva. */
+  /** Out of bounds, obstacle, or living unit. */
   isBlocked(c: GridCoord, units: readonly Occupant[]): boolean {
     return !this.isInBounds(c) || this.isObstacle(c) || this.isOccupied(c, units);
   }
 
-  /** Vizinhos ortogonais dentro da grade. */
+  /** Orthogonal neighbors within the grid. */
   getNeighbors(c: GridCoord): GridCoord[] {
     return STEPS.map((s) => ({ x: c.x + s.x, y: c.y + s.y })).filter((n) => this.isInBounds(n));
   }
 
   /**
-   * Linha de visão entre os centros das duas células. Um obstáculo com `blocksLos` a interrompe quando o
-   * segmento atravessa o interior da sua célula; tocar só o canto não bloqueia. Origem e destino nunca bloqueiam.
+   * Line of sight between the centers of two cells. An obstacle with `blocksLos` interrupts it when the
+   * segment crosses the interior of its cell; touching only a corner does not block. Origin and destination never block.
    */
   hasLineOfSight(from: GridCoord, to: GridCoord, obstacles: readonly ObstacleDef[] = this.obstacles): boolean {
     return !obstacles.some(
@@ -85,14 +85,14 @@ export class GridSystem {
     );
   }
 
-  /** Células onde dá para parar saindo de `from` com até `range` passos, da mais próxima à mais distante. */
+  /** Cells reachable from `from` within `range` steps, ordered from closest to farthest. */
   getReachableCells(from: GridCoord, range: number, units: readonly Occupant[]): GridCoord[] {
     return this.search(from, units, range)
       .slice(1)
       .map((n) => ({ ...n.cell }));
   }
 
-  /** Menor caminho com origem e destino incluídos, ou `null`. O destino precisa estar livre. */
+  /** Shortest path including origin and destination, or `null`. Destination must be free. */
   getPath(from: GridCoord, to: GridCoord, units: readonly Occupant[]): GridCoord[] | null {
     let node = this.search(from, units, Infinity).find((n) => sameCell(n.cell, to)) ?? null;
     if (!node) return null;
@@ -101,7 +101,7 @@ export class GridSystem {
     return path;
   }
 
-  /** BFS a partir de `from`. A origem não é testada como bloqueio: é a célula de quem anda. */
+  /** BFS starting from `from`. Origin is not tested for blockage: it is the mover's cell. */
   private search(from: GridCoord, units: readonly Occupant[], maxSteps: number): SearchNode[] {
     if (!this.isInBounds(from)) return [];
     const nodes: SearchNode[] = [{ cell: from, dist: 0, prev: null }];

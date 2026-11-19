@@ -91,7 +91,7 @@ function parseHeroList(raw: unknown, allowZeroHp: boolean): CampaignHeroProgress
   return parsed;
 }
 
-/** Valida e converte um objeto desconhecido em `CampaignState`, retornando `null` se inválido. */
+/** Validates and converts an unknown object into `CampaignState`, returning `null` if invalid. */
 export function validateCampaignState(raw: unknown): CampaignState | null {
   if (!isRecord(raw)) return null;
   if (raw.version !== CAMPAIGN_SAVE_VERSION) return null;
@@ -124,7 +124,7 @@ export function validateCampaignState(raw: unknown): CampaignState | null {
 }
 
 /**
- * Persistência versionada da campanha usando `StorageAdapter` injetável (sem acessar DOM/window).
+ * Versioned campaign persistence using an injectable `StorageAdapter` (no DOM/window access).
  */
 export class SaveSystem {
   constructor(

@@ -3,6 +3,7 @@ import type { GridCoord, MapConfig, ObstacleDef } from '../shared/types';
 import { computeOccludedIds, type OcclusionItem } from './scenarioOcclusion';
 import type { SceneAtmosphereConfig } from './SceneManager';
 import { buildFortressScenario } from './scenarios/FortressScenario';
+import { buildDorterScenario } from './scenarios/DorterScenario';
 import type {
   ObstacleRayUserData,
   ScenarioBuildOptions,
@@ -31,14 +32,66 @@ export interface BuildBoardOptions {
 }
 
 const GRID_HIGHLIGHTS = {
-  movement: { color: 0x3b82f6, opacity: 0.28 },
+  movement: { color: 0x3b82f6, opacity: 0.20, borderColor: 0x60a5fa, borderOpacity: 0.78 },
   attackRange: { color: 0xef4444, opacity: 0.12 },
   healRange: { color: 0x34d399, opacity: 0.14 },
-  validTarget: { color: 0xf97316, opacity: 0.40 },
+  validTarget: { color: 0xef4444, opacity: 0.26, borderColor: 0xf87171, borderOpacity: 0.85 },
 } as const;
 
 const CELL_SIZE = 1;
 const TILE_HEIGHT = 0.16;
+const TILE_Y_OFFSETS = [-0.014, -0.008, 0, 0.008, 0.014] as const;
+
+function createSquareBorderGeometry(outerHalf: number, innerHalf: number): THREE.ShapeGeometry {
+  const outer = new THREE.Shape();
+  outer.moveTo(-outerHalf, -outerHalf);
+  outer.lineTo(outerHalf, -outerHalf);
+  outer.lineTo(outerHalf, outerHalf);
+  outer.lineTo(-outerHalf, outerHalf);
+  outer.closePath();
+
+  const hole = new THREE.Path();
+  hole.moveTo(-innerHalf, -innerHalf);
+  hole.lineTo(innerHalf, -innerHalf);
+  hole.lineTo(innerHalf, innerHalf);
+  hole.lineTo(-innerHalf, innerHalf);
+  hole.closePath();
+  outer.holes.push(hole);
+
+  return new THREE.ShapeGeometry(outer);
+}
+
+function createCornerReticleGeometry(outerHalf: number, armLen: number, thickness: number): THREE.ShapeGeometry {
+  const inner = outerHalf - thickness;
+  const shapes: THREE.Shape[] = [];
+  const signs: [number, number][] = [
+    [1, 1],
+    [-1, 1],
+    [-1, -1],
+    [1, -1],
+  ];
+
+  for (const [sx, sy] of signs) {
+    const s = new THREE.Shape();
+    const ox = sx * outerHalf;
+    const oy = sy * outerHalf;
+    const ix = sx * inner;
+    const iy = sy * inner;
+    const ax = sx * (outerHalf - armLen);
+    const ay = sy * (outerHalf - armLen);
+
+    s.moveTo(ax, oy);
+    s.lineTo(ox, oy);
+    s.lineTo(ox, ay);
+    s.lineTo(ix, ay);
+    s.lineTo(ix, iy);
+    s.lineTo(ax, iy);
+    s.closePath();
+    shapes.push(s);
+  }
+
+  return new THREE.ShapeGeometry(shapes);
+}
 
 function coordKey(c: GridCoord): string {
   return `${c.x},${c.y}`;
@@ -61,14 +114,23 @@ export class BoardRenderer {
 
   private readonly tileGeo = new THREE.BoxGeometry(0.95, TILE_HEIGHT, 0.95);
   private readonly tileMatLight: THREE.MeshStandardMaterial;
+  private readonly tileMatMid: THREE.MeshStandardMaterial;
   private readonly tileMatDark: THREE.MeshStandardMaterial;
   private readonly wallMat: THREE.MeshStandardMaterial;
 
   private readonly highlightGeo = new THREE.PlaneGeometry(0.9, 0.9);
+  private readonly highlightBorderGeo = createSquareBorderGeometry(0.45, 0.405);
+  private readonly hoverReticleGeo = createCornerReticleGeometry(0.47, 0.2, 0.052);
   private readonly reachableMat = new THREE.MeshBasicMaterial({
     color: GRID_HIGHLIGHTS.movement.color,
     transparent: true,
     opacity: GRID_HIGHLIGHTS.movement.opacity,
+    depthWrite: false,
+  });
+  private readonly reachableBorderMat = new THREE.MeshBasicMaterial({
+    color: GRID_HIGHLIGHTS.movement.borderColor,
+    transparent: true,
+    opacity: GRID_HIGHLIGHTS.movement.borderOpacity,
     depthWrite: false,
   });
   private readonly attackRangeMat = new THREE.MeshBasicMaterial({
@@ -89,52 +151,88 @@ export class BoardRenderer {
     opacity: GRID_HIGHLIGHTS.validTarget.opacity,
     depthWrite: false,
   });
+  private readonly attackableBorderMat = new THREE.MeshBasicMaterial({
+    color: GRID_HIGHLIGHTS.validTarget.borderColor,
+    transparent: true,
+    opacity: GRID_HIGHLIGHTS.validTarget.borderOpacity,
+    depthWrite: false,
+  });
   private readonly skillTargetMat = new THREE.MeshBasicMaterial({
     color: 0xa855f7,
     transparent: true,
-    opacity: 0.55,
+    opacity: 0.34,
+    depthWrite: false,
+  });
+  private readonly skillTargetBorderMat = new THREE.MeshBasicMaterial({
+    color: 0xc084fc,
+    transparent: true,
+    opacity: 0.86,
     depthWrite: false,
   });
   private readonly skillAreaMat = new THREE.MeshBasicMaterial({
     color: 0x22d3ee,
     transparent: true,
-    opacity: 0.45,
+    opacity: 0.28,
+    depthWrite: false,
+  });
+  private readonly skillAreaBorderMat = new THREE.MeshBasicMaterial({
+    color: 0x22d3ee,
+    transparent: true,
+    opacity: 0.85,
     depthWrite: false,
   });
   private readonly hoverMoveMat = new THREE.MeshBasicMaterial({
     color: 0x22c55e,
     transparent: true,
-    opacity: 0.72,
+    opacity: 0.42,
     depthWrite: false,
   });
   private readonly hoverAttackMat = new THREE.MeshBasicMaterial({
-    color: 0xf97316,
+    color: 0xef4444,
     transparent: true,
-    opacity: 0.72,
+    opacity: 0.48,
     depthWrite: false,
   });
   private readonly hoverSkillMat = new THREE.MeshBasicMaterial({
     color: 0x22d3ee,
     transparent: true,
-    opacity: 0.75,
+    opacity: 0.46,
     depthWrite: false,
   });
   private readonly healTargetMat = new THREE.MeshBasicMaterial({
     color: 0x34d399,
     transparent: true,
-    opacity: 0.56,
+    opacity: 0.32,
+    depthWrite: false,
+  });
+  private readonly healTargetBorderMat = new THREE.MeshBasicMaterial({
+    color: 0x6ee7b7,
+    transparent: true,
+    opacity: 0.82,
     depthWrite: false,
   });
   private readonly hoverHealMat = new THREE.MeshBasicMaterial({
     color: 0xfacc15,
     transparent: true,
-    opacity: 0.78,
+    opacity: 0.48,
+    depthWrite: false,
+  });
+  private readonly hoverReticleGoldMat = new THREE.MeshBasicMaterial({
+    color: 0xfacc15,
+    transparent: true,
+    opacity: 0.94,
+    depthWrite: false,
+  });
+  private readonly hoverReticleEmeraldMat = new THREE.MeshBasicMaterial({
+    color: 0x34d399,
+    transparent: true,
+    opacity: 0.94,
     depthWrite: false,
   });
   private readonly dangerMat = new THREE.MeshBasicMaterial({
     color: 0xef4444,
     transparent: true,
-    opacity: 0.42,
+    opacity: 0.32,
     depthWrite: false,
   });
   private readonly dangerAmberMat = new THREE.MeshBasicMaterial({
@@ -167,6 +265,12 @@ export class BoardRenderer {
       map: this.floorTexture,
       color: 0xcbd5e1,
       roughness: 0.85,
+      metalness: 0.05,
+    });
+    this.tileMatMid = new THREE.MeshStandardMaterial({
+      map: this.floorTexture,
+      color: 0xb0bccb,
+      roughness: 0.86,
       metalness: 0.05,
     });
     this.tileMatDark = new THREE.MeshStandardMaterial({
@@ -214,7 +318,7 @@ export class BoardRenderer {
     this.tileMeshes = [];
     this.obstacleMeshes = [];
 
-    if (mapId === 'forgotten-swamp' || mapId === 'fortress') {
+    if (mapId === 'forgotten-swamp' || mapId === 'fortress' || mapId === 'dorter-ruins') {
       const scenarioOptions: ScenarioBuildOptions = {
         mapId,
         gridSize,
@@ -222,8 +326,9 @@ export class BoardRenderer {
         theme,
         bridgeCells,
       };
-      const scenario =
-        mapId === 'forgotten-swamp'
+      const scenario = mapId === 'dorter-ruins'
+        ? buildDorterScenario(scenarioOptions)
+        : mapId === 'forgotten-swamp'
           ? buildSwampScenario(scenarioOptions)
           : buildFortressScenario(scenarioOptions);
 
@@ -247,9 +352,36 @@ export class BoardRenderer {
     const isSanctuary = mapId === 'sanctuary' || theme === 'sanctuary';
     const isSwamp = mapId === 'swamp' || theme === 'swamp';
 
-    // Plinto/base de diorama em camadas estilo FFT (y < 0, fora das células jogáveis)
-    const upperWidth = gridSize * CELL_SIZE + 0.65;
-    const upperHeight = 0.38;
+    // Layered FFT-style diorama plinth/base (y < 0, outside playable cells)
+    // 1. Weathered stone lip overhanging the darker stratified bedrock/earth skirt
+    const lipWidth = gridSize * CELL_SIZE + 0.88;
+    const lipHeight = 0.16;
+    const lipColor = isSanctuary
+      ? 0x2d1f24
+      : isFortress
+        ? 0x475569
+        : isSwamp
+          ? 0x2e4034
+          : 0x4b5563;
+    const lipMat = new THREE.MeshStandardMaterial({
+      map: this.wallTexture,
+      color: lipColor,
+      roughness: 0.88,
+      metalness: isSanctuary ? 0.14 : 0.06,
+    });
+    const lipMesh = new THREE.Mesh(
+      new THREE.BoxGeometry(lipWidth, lipHeight, lipWidth),
+      lipMat
+    );
+    lipMesh.position.set(0, -TILE_HEIGHT / 2 - lipHeight / 2, 0);
+    lipMesh.receiveShadow = true;
+    lipMesh.castShadow = true;
+    lipMesh.raycast = () => {};
+    this.group.add(lipMesh);
+
+    // 2. Recessed upper earth/masonry skirt under the overhanging lip
+    const upperWidth = gridSize * CELL_SIZE + 0.62;
+    const upperHeight = 0.34;
     const upperColor = isSanctuary
       ? 0x1c1418
       : isFortress
@@ -259,19 +391,21 @@ export class BoardRenderer {
           : 0x334155;
     const upperMat = new THREE.MeshStandardMaterial({
       color: upperColor,
-      roughness: 0.9,
+      roughness: 0.92,
       metalness: isSanctuary ? 0.16 : 0.08,
     });
     const upperMesh = new THREE.Mesh(
       new THREE.BoxGeometry(upperWidth, upperHeight, upperWidth),
       upperMat
     );
-    upperMesh.position.set(0, -TILE_HEIGHT / 2 - upperHeight / 2, 0);
+    upperMesh.position.set(0, -TILE_HEIGHT / 2 - lipHeight - upperHeight / 2, 0);
     upperMesh.receiveShadow = true;
+    upperMesh.raycast = () => {};
     this.group.add(upperMesh);
 
-    const midWidth = gridSize * CELL_SIZE + 1.4;
-    const midHeight = 0.48;
+    // 3. Mid stratified bedrock stratum
+    const midWidth = gridSize * CELL_SIZE + 1.32;
+    const midHeight = 0.44;
     const midColor = isSanctuary
       ? 0x140d10
       : isFortress
@@ -287,25 +421,71 @@ export class BoardRenderer {
       new THREE.BoxGeometry(midWidth, midHeight, midWidth),
       midMat
     );
-    midMesh.position.set(0, -TILE_HEIGHT / 2 - upperHeight - midHeight / 2, 0);
+    midMesh.position.set(0, -TILE_HEIGHT / 2 - lipHeight - upperHeight - midHeight / 2, 0);
     midMesh.receiveShadow = true;
+    midMesh.raycast = () => {};
     this.group.add(midMesh);
 
-    const lowerWidth = gridSize * CELL_SIZE + 2.15;
-    const lowerHeight = 0.65;
+    // 4. Deep bedrock base
+    const lowerWidth = gridSize * CELL_SIZE + 2.08;
+    const lowerHeight = 0.62;
     const lowerMat = new THREE.MeshStandardMaterial({
-      color: isSanctuary ? 0x0c0709 : 0x161f2e,
+      color: isSanctuary ? 0x0c0709 : 0x131b29,
       roughness: 0.96,
     });
     const lowerMesh = new THREE.Mesh(
       new THREE.BoxGeometry(lowerWidth, lowerHeight, lowerWidth),
       lowerMat
     );
-    lowerMesh.position.set(0, -TILE_HEIGHT / 2 - upperHeight - midHeight - lowerHeight / 2, 0);
+    lowerMesh.position.set(
+      0,
+      -TILE_HEIGHT / 2 - lipHeight - upperHeight - midHeight - lowerHeight / 2,
+      0
+    );
     lowerMesh.receiveShadow = true;
+    lowerMesh.raycast = () => {};
     this.group.add(lowerMesh);
 
-    // Detalhes sutis nos degraus da borda externa do diorama
+    // 5. Four corner stone buttresses / pilasters anchoring the plinth
+    const totalPlinthDepth = lipHeight + upperHeight + midHeight + lowerHeight;
+    const buttressOffset = upperWidth / 2 + 0.14;
+    const buttressCorners: [number, number][] = [
+      [-buttressOffset, -buttressOffset],
+      [buttressOffset, -buttressOffset],
+      [-buttressOffset, buttressOffset],
+      [buttressOffset, buttressOffset],
+    ];
+    for (const [bx, bz] of buttressCorners) {
+      const shaft = new THREE.Mesh(
+        new THREE.BoxGeometry(0.46, totalPlinthDepth * 0.88, 0.46),
+        lipMat
+      );
+      shaft.position.set(bx, -TILE_HEIGHT / 2 - (totalPlinthDepth * 0.88) / 2 - 0.02, bz);
+      shaft.castShadow = true;
+      shaft.receiveShadow = true;
+      shaft.raycast = () => {};
+
+      const cap = new THREE.Mesh(
+        new THREE.BoxGeometry(0.56, 0.16, 0.56),
+        lipMat
+      );
+      cap.position.set(bx, -TILE_HEIGHT / 2 - 0.06, bz);
+      cap.castShadow = true;
+      cap.receiveShadow = true;
+      cap.raycast = () => {};
+
+      const foot = new THREE.Mesh(
+        new THREE.BoxGeometry(0.64, 0.24, 0.64),
+        midMat
+      );
+      foot.position.set(bx, -TILE_HEIGHT / 2 - totalPlinthDepth + 0.12, bz);
+      foot.receiveShadow = true;
+      foot.raycast = () => {};
+
+      this.group.add(shaft, cap, foot);
+    }
+
+    // Subtle moss/ember accents along the stepped diorama ledge
     const dioramaEdgeMat = new THREE.MeshStandardMaterial({
       color: isSanctuary ? 0x450a0a : 0x2d5a3c,
       emissive: isSanctuary ? 0x7f1d1d : 0x000000,
@@ -313,7 +493,7 @@ export class BoardRenderer {
       roughness: 0.92,
     });
     const stepOffset = midWidth / 2 - 0.14;
-    const stepY = -TILE_HEIGHT / 2 - upperHeight + 0.02;
+    const stepY = -TILE_HEIGHT / 2 - lipHeight - upperHeight + 0.02;
     const mossEdgeCoords: [number, number, number, number][] = [
       [-stepOffset * 0.65, stepOffset, 1.4, 0.28],
       [stepOffset * 0.45, stepOffset, 1.1, 0.28],
@@ -328,23 +508,46 @@ export class BoardRenderer {
       );
       strip.position.set(mx, stepY, mz);
       strip.receiveShadow = true;
+      strip.raycast = () => {};
       this.group.add(strip);
     }
+
+    // Thin dark mortar/grout recess plane beneath the stone tiles
+    const groutMat = new THREE.MeshStandardMaterial({
+      color: isSanctuary ? 0x0e080b : 0x0f172a,
+      roughness: 0.98,
+      metalness: 0.0,
+    });
+    const groutPlane = new THREE.Mesh(
+      new THREE.PlaneGeometry(gridSize * CELL_SIZE, gridSize * CELL_SIZE),
+      groutMat
+    );
+    groutPlane.rotation.x = -Math.PI / 2;
+    groutPlane.position.set(0, -0.095, 0);
+    groutPlane.receiveShadow = true;
+    groutPlane.raycast = () => {};
+    this.group.add(groutPlane);
 
     const waterKeys = new Set(
       obstacleDefs.filter((o) => o.kind === 'water').map((o) => coordKey(o.pos))
     );
 
-    // Stone floor tiles
+    // Stone floor tiles with subtle deterministic height and 3-shade stone variation
     for (let y = 0; y < gridSize; y++) {
       for (let x = 0; x < gridSize; x++) {
-        const isLight = (x + y) % 2 === 0;
+        const isEven = (x + y) % 2 === 0;
+        const hash = (x * 7 + y * 13) % 5;
         const isWater = waterKeys.has(coordKey({ x, y }));
-        const tile = new THREE.Mesh(
-          this.tileGeo,
-          isLight ? this.tileMatLight : this.tileMatDark
-        );
-        const yPos = isWater ? -TILE_HEIGHT / 2 - 0.08 : -TILE_HEIGHT / 2;
+        const tileMat = isEven
+          ? hash === 0
+            ? this.tileMatMid
+            : this.tileMatLight
+          : hash === 4
+            ? this.tileMatMid
+            : this.tileMatDark;
+        const tile = new THREE.Mesh(this.tileGeo, tileMat);
+        const yJitter = isWater ? 0 : TILE_Y_OFFSETS[hash];
+        const yPos = isWater ? -TILE_HEIGHT / 2 - 0.08 : -TILE_HEIGHT / 2 + yJitter;
         tile.position.copy(this.gridToWorld({ x, y }, yPos));
         tile.receiveShadow = true;
         tile.userData = {
@@ -356,7 +559,7 @@ export class BoardRenderer {
       }
     }
 
-    // Perímetro decorativo conforme o mapa / tema
+    // Decorative perimeter matching the map / theme
     this.buildPerimeterScenery(gridSize, mapId, theme);
 
     // Internal obstacles by kind
@@ -364,7 +567,7 @@ export class BoardRenderer {
       this.buildObstacle(obs);
     }
 
-    // Pontes visuais sobre água/pântano
+    // Visual bridges over water/swamp
     for (const cell of bridgeCells) {
       this.buildBridgeCell(cell);
     }
@@ -430,7 +633,7 @@ export class BoardRenderer {
     }
 
     if (isSanctuary) {
-      // Santuário Corrompido: obeliscos sombrios, brasas incandescentes e estandartes carmim
+      // Corrupted Sanctuary: dark obelisks, glowing embers, and crimson banners
       const obsidianMat = new THREE.MeshStandardMaterial({
         color: 0x1c1917,
         roughness: 0.75,
@@ -459,7 +662,7 @@ export class BoardRenderer {
         this.group.add(obelisk, runeCore);
       }
 
-      // Brasas espalhadas pela borda do santuário
+      // Embers scattered along the sanctuary border
       const emberSpots: [number, number][] = [
         [-mossEdge, -half * 0.2],
         [-mossEdge, half * 0.55],
@@ -545,7 +748,7 @@ export class BoardRenderer {
     }
 
     if (mapId === 'courtyard') {
-      // Arcos quebrados + vegetação discreta de pátio
+      // Broken arches + subtle courtyard foliage
       const archPosts: [number, number, number][] = [
         [-half * 0.55, -outerRadius, 1.6],
         [-half * 0.25, -outerRadius, 1.3],
@@ -582,7 +785,7 @@ export class BoardRenderer {
       return;
     }
 
-    // 'ruins' (padrão): muros quebrados, arco de pedra na borda e tufos de musgo
+    // 'ruins' (default): broken walls, stone border arch, and moss tufts
     const backWallSegments: { x: number; y: number; z: number; w: number; h: number; d: number }[] = [
       { x: -half * 0.55, y: 0.9, z: -outerRadius, w: gridSize * 0.4, h: 1.8, d: 0.5 },
       { x: half * 0.45, y: 0.65, z: -outerRadius, w: gridSize * 0.35, h: 1.3, d: 0.5 },
@@ -689,7 +892,7 @@ export class BoardRenderer {
       waterPlane.receiveShadow = true;
       waterPlane.userData = { gridCoord: obs.pos, obstacleKind: 'water' };
       group.add(waterPlane);
-      // Não entra em obstacleMeshes: água é rebaixada e não bloqueia LoS nem seleção atrás dela.
+      // Excluded from obstacleMeshes: water is recessed and does not block LoS or selection behind it.
     } else {
       // barrel
       const woodMat = new THREE.MeshStandardMaterial({ color: 0x7c4d25, roughness: 0.82 });
@@ -817,7 +1020,8 @@ export class BoardRenderer {
       this.addTileHighlight(
         cell,
         isHovered ? this.hoverMoveMat : this.reachableMat,
-        isHovered ? 0.02 : 0.012
+        isHovered ? 0.02 : 0.012,
+        this.reachableBorderMat
       );
     }
 
@@ -841,7 +1045,8 @@ export class BoardRenderer {
       this.addTileHighlight(
         cell,
         isHovered ? this.hoverAttackMat : this.attackableMat,
-        isHovered ? 0.022 : 0.014
+        isHovered ? 0.022 : 0.014,
+        this.attackableBorderMat
       );
     }
 
@@ -856,18 +1061,19 @@ export class BoardRenderer {
         : isHovered
           ? this.hoverSkillMat
           : this.skillTargetMat;
-      this.addTileHighlight(cell, mat, isHovered ? 0.024 : 0.016);
+      const borderMat = isHeal ? this.healTargetBorderMat : this.skillTargetBorderMat;
+      this.addTileHighlight(cell, mat, isHovered ? 0.024 : 0.016, borderMat);
     }
 
     for (const cell of highlights.skillArea) {
       const isHovered = hoverKey === coordKey(cell);
       if (!isHovered) {
-        this.addTileHighlight(cell, this.skillAreaMat, 0.021);
+        this.addTileHighlight(cell, this.skillAreaMat, 0.021, this.skillAreaBorderMat);
       }
     }
 
     for (const cell of highlights.dangerCells ?? []) {
-      this.addTileHighlight(cell, this.dangerMat, 0.015);
+      this.addTileHighlight(cell, this.dangerMat, 0.015, this.attackableBorderMat);
       const warningFrame = new THREE.Mesh(this.dangerRingGeo, this.dangerAmberMat);
       warningFrame.rotation.x = -Math.PI / 2;
       warningFrame.rotation.z = Math.PI / 4;
@@ -876,17 +1082,42 @@ export class BoardRenderer {
       this.highlightGroup.add(warningFrame);
     }
 
+    if (highlights.hoverCell) {
+      const isMoveHover = highlights.reachable.some((c) => coordKey(c) === hoverKey);
+      const isHealHover = isHeal && validSkillKeys.has(hoverKey ?? '');
+      const reticleMat =
+        isMoveHover || isHealHover ? this.hoverReticleEmeraldMat : this.hoverReticleGoldMat;
+      const reticle = new THREE.Mesh(this.hoverReticleGeo, reticleMat);
+      reticle.rotation.x = -Math.PI / 2;
+      reticle.position.copy(this.gridToWorld(highlights.hoverCell, 0.028));
+      reticle.raycast = () => {};
+      this.highlightGroup.add(reticle);
+    }
+
     if (highlights.path && highlights.path.length >= 2) {
       this.renderPathPreview(highlights.path);
     }
   }
 
-  private addTileHighlight(cell: GridCoord, material: THREE.Material, yOffset: number): void {
+  private addTileHighlight(
+    cell: GridCoord,
+    material: THREE.Material,
+    yOffset: number,
+    borderMaterial?: THREE.Material
+  ): void {
     const plane = new THREE.Mesh(this.highlightGeo, material);
     plane.rotation.x = -Math.PI / 2;
     plane.position.copy(this.gridToWorld(cell, yOffset));
     plane.raycast = () => {};
     this.highlightGroup.add(plane);
+
+    if (borderMaterial) {
+      const border = new THREE.Mesh(this.highlightBorderGeo, borderMaterial);
+      border.rotation.x = -Math.PI / 2;
+      border.position.copy(this.gridToWorld(cell, yOffset + 0.001));
+      border.raycast = () => {};
+      this.highlightGroup.add(border);
+    }
   }
 
   private renderPathPreview(path: GridCoord[]): void {
@@ -934,10 +1165,13 @@ export class BoardRenderer {
     const sharedGeos = new Set<THREE.BufferGeometry>([
       this.tileGeo,
       this.highlightGeo,
+      this.highlightBorderGeo,
+      this.hoverReticleGeo,
       this.dangerRingGeo,
     ]);
     const sharedMats = new Set<THREE.Material>([
       this.tileMatLight,
+      this.tileMatMid,
       this.tileMatDark,
       this.wallMat,
     ]);
@@ -982,23 +1216,33 @@ export class BoardRenderer {
     this.clearGroup(this.pathGroup, true);
     this.tileGeo.dispose();
     this.highlightGeo.dispose();
+    this.highlightBorderGeo.dispose();
+    this.hoverReticleGeo.dispose();
     this.dangerRingGeo.dispose();
     this.tileMatLight.dispose();
+    this.tileMatMid.dispose();
     this.tileMatDark.dispose();
     this.wallMat.dispose();
     this.floorTexture.dispose();
     this.wallTexture.dispose();
     this.reachableMat.dispose();
+    this.reachableBorderMat.dispose();
     this.attackRangeMat.dispose();
     this.healRangeMat.dispose();
     this.attackableMat.dispose();
+    this.attackableBorderMat.dispose();
     this.skillTargetMat.dispose();
+    this.skillTargetBorderMat.dispose();
     this.skillAreaMat.dispose();
+    this.skillAreaBorderMat.dispose();
     this.hoverMoveMat.dispose();
     this.hoverAttackMat.dispose();
     this.hoverSkillMat.dispose();
     this.healTargetMat.dispose();
+    this.healTargetBorderMat.dispose();
     this.hoverHealMat.dispose();
+    this.hoverReticleGoldMat.dispose();
+    this.hoverReticleEmeraldMat.dispose();
     this.dangerMat.dispose();
     this.dangerAmberMat.dispose();
     this.pathMat.dispose();

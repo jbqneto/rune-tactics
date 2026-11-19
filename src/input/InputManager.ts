@@ -50,10 +50,36 @@ function sameCoord(a: GridCoord, b: GridCoord): boolean {
   return a.x === b.x && a.y === b.y;
 }
 
+/** Max finger travel (px) for a touch to still count as a tap rather than a camera drag. */
+export const TOUCH_TAP_SLOP_PX = 10;
+
+export interface TouchTapInput {
+  /** `${mode}:${x},${y}` of the target previewed by the previous tap, if any. */
+  previewToken: string | null;
+  tapToken: string | null;
+  /** Whether the tapped target would trigger an action (move, attack, skill). */
+  actionable: boolean;
+}
+
+export interface TouchTapDecision {
+  action: 'preview' | 'commit' | 'clear';
+  previewToken: string | null;
+}
+
 /**
- * Resolve o alvo do cursor a partir dos hits separados por camada,
- * permitindo selecionar células livres encobertas por modelos de unidades
- * enquanto obstáculos sólidos bloqueiam qualquer clique atrás deles.
+ * Touch screens have no hover, so the first tap previews the path/target and a
+ * second tap on the same target (same mode) confirms it. Prevents fat-finger moves.
+ */
+export function resolveTouchTap({ previewToken, tapToken, actionable }: TouchTapInput): TouchTapDecision {
+  if (!actionable || tapToken === null) return { action: 'clear', previewToken: null };
+  if (tapToken === previewToken) return { action: 'commit', previewToken: null };
+  return { action: 'preview', previewToken: tapToken };
+}
+
+/**
+ * Resolves the cursor target from layer-separated raycast hits,
+ * allowing free cells occluded by unit models to be selected
+ * while solid obstacles block any click behind them.
  */
 export function resolvePickTarget(
   hits: RaycastHits,
@@ -114,8 +140,8 @@ export function resolvePickTarget(
     return { unitId: null, cell: null };
   }
 
-  // Modo 'default': ataca inimigo atacável clicado diretamente (se disponível);
-  // caso contrário ignora unitHits para nunca bloquear células livres atrás de unidades.
+  // 'default' mode: directly attack a clicked attackable enemy (if available);
+  // otherwise ignore unitHits so free cells behind units are never blocked.
   if (ctx.canBasicAttack) {
     const hitEnemy = findUnitHit(ctx.attackableIds);
     if (hitEnemy) {
@@ -150,10 +176,14 @@ export class InputManager {
   private readonly ndc = new THREE.Vector2();
   private lastHoverKey: string | null = null;
   private lastMode: InteractionMode = 'default';
+  private touchPreviewToken: string | null = null;
+  private touchStart: { id: number; x: number; y: number } | null = null;
 
   private readonly handlePointerMoveBound: (e: PointerEvent) => void;
   private readonly handlePointerDownBound: (e: PointerEvent) => void;
-  private readonly handlePointerLeaveBound: () => void;
+  private readonly handlePointerUpBound: (e: PointerEvent) => void;
+  private readonly handlePointerCancelBound: () => void;
+  private readonly handlePointerLeaveBound: (e: PointerEvent) => void;
   private readonly handleContextMenuBound: (e: MouseEvent) => void;
 
   constructor(
@@ -173,12 +203,22 @@ export class InputManager {
     this.callbacks = callbacks;
     this.cameraController = cameraController;
 
-    this.handlePointerMoveBound = (e) => this.onPointerMove(e);
+    this.handlePointerMoveBound = (e) => {
+      // Touch has no hover: previews come from taps (see onTouchTap).
+      if (e.pointerType !== 'touch') this.onPointerMove(e);
+    };
     this.handlePointerDownBound = (e) => this.onPointerDown(e);
-    this.handlePointerLeaveBound = () => this.onPointerLeave();
+    this.handlePointerUpBound = (e) => this.onPointerUp(e);
+    this.handlePointerCancelBound = () => {
+      this.touchStart = null;
+    };
+    this.handlePointerLeaveBound = (e) => {
+      // Lifting a finger fires pointerleave; keep the tap preview visible.
+      if (e.pointerType !== 'touch') this.onPointerLeave();
+    };
     this.handleContextMenuBound = (e) => {
       e.preventDefault();
-      // Arraste com botão direito orbita a câmera; apenas clique direito parado cancela o modo.
+      // Right-click drag orbits the camera; only a stationary right-click cancels the current mode.
       if (this.cameraController?.consumeRightDrag()) {
         return;
       }
@@ -191,6 +231,8 @@ export class InputManager {
 
     this.canvas.addEventListener('pointermove', this.handlePointerMoveBound);
     this.canvas.addEventListener('pointerdown', this.handlePointerDownBound);
+    this.canvas.addEventListener('pointerup', this.handlePointerUpBound);
+    this.canvas.addEventListener('pointercancel', this.handlePointerCancelBound);
     this.canvas.addEventListener('pointerleave', this.handlePointerLeaveBound);
     this.canvas.addEventListener('contextmenu', this.handleContextMenuBound);
   }
@@ -265,10 +307,11 @@ export class InputManager {
     return resolvePickTarget(hits, units, context);
   }
 
-  private onPointerMove(e: PointerEvent): void {
+  /** Updates hover feedback; returns whether the target under the pointer is actionable. */
+  private onPointerMove(e: PointerEvent): boolean {
     if (this.cameraController?.isDragging) {
       this.canvas.style.cursor = 'grabbing';
-      return;
+      return false;
     }
 
     if (this.isInputBlocked()) {
@@ -277,7 +320,7 @@ export class InputManager {
         this.callbacks.onHoverChange(null, null, []);
       }
       this.canvas.style.cursor = 'default';
-      return;
+      return false;
     }
 
     const mode = this.callbacks.getMode();
@@ -297,7 +340,7 @@ export class InputManager {
       const isSkillTarget = isDirectSkillTarget || smartPlan !== null;
       this.canvas.style.cursor = isSkillTarget ? 'pointer' : 'default';
 
-      if (key === this.lastHoverKey && mode === this.lastMode) return;
+      if (key === this.lastHoverKey && mode === this.lastMode) return isSkillTarget;
       this.lastHoverKey = key;
       this.lastMode = mode;
 
@@ -308,7 +351,7 @@ export class InputManager {
         smartPlan && smartPlan.path.length >= 2 ? smartPlan.path : null,
         skillArea
       );
-      return;
+      return isSkillTarget;
     }
 
     const hoveredEnemy =
@@ -324,7 +367,7 @@ export class InputManager {
 
     if (mode === 'attack') {
       this.canvas.style.cursor = hoveredEnemy ? 'pointer' : 'default';
-      if (key === this.lastHoverKey && mode === this.lastMode) return;
+      if (key === this.lastHoverKey && mode === this.lastMode) return hoveredEnemy !== null;
       this.lastHoverKey = key;
       this.lastMode = mode;
       this.callbacks.onHoverChange(
@@ -332,15 +375,16 @@ export class InputManager {
         smartAttackPlan && smartAttackPlan.path.length >= 2 ? smartAttackPlan.path : null,
         []
       );
-      return;
+      return hoveredEnemy !== null;
     }
 
     const reachable = selectedUnit ? this.engine.getReachableCells() : [];
     const isReachable = cell ? reachable.some((c) => sameCoord(c, cell)) : false;
+    const actionable = isReachable || smartAttackPlan !== null;
 
-    this.canvas.style.cursor = isReachable || smartAttackPlan !== null ? 'pointer' : 'default';
+    this.canvas.style.cursor = actionable ? 'pointer' : 'default';
 
-    if (key === this.lastHoverKey && mode === this.lastMode) return;
+    if (key === this.lastHoverKey && mode === this.lastMode) return actionable;
     this.lastHoverKey = key;
     this.lastMode = mode;
 
@@ -352,11 +396,48 @@ export class InputManager {
     }
 
     this.callbacks.onHoverChange(cell, path, []);
+    return actionable;
   }
 
   private onPointerDown(e: PointerEvent): void {
+    if (e.pointerType === 'touch') {
+      // Act on release, once we know it was a tap and not a camera drag.
+      this.touchStart = e.isPrimary === false ? null : { id: e.pointerId, x: e.clientX, y: e.clientY };
+      return;
+    }
     if (e.button !== 0 || this.isInputBlocked()) return;
+    this.executeAt(e);
+  }
 
+  private onPointerUp(e: PointerEvent): void {
+    const start = this.touchStart;
+    if (e.pointerType !== 'touch' || !start || start.id !== e.pointerId) return;
+    this.touchStart = null;
+    if (Math.hypot(e.clientX - start.x, e.clientY - start.y) > TOUCH_TAP_SLOP_PX) return;
+    this.onTouchTap(e);
+  }
+
+  private onTouchTap(e: PointerEvent): void {
+    if (this.isInputBlocked()) return;
+    const mode = this.callbacks.getMode();
+    this.lastHoverKey = null; // force a fresh preview for this tap
+    const actionable = this.onPointerMove(e);
+    const tapToken = this.lastHoverKey !== null ? `${mode}:${this.lastHoverKey}` : null;
+    const decision = resolveTouchTap({ previewToken: this.touchPreviewToken, tapToken, actionable });
+    this.touchPreviewToken = decision.previewToken;
+
+    if (decision.action === 'commit') {
+      this.executeAt(e);
+    } else if (decision.action === 'preview') {
+      this.callbacks.onFeedback?.('Tap again to confirm');
+    } else {
+      this.lastHoverKey = null;
+      this.callbacks.onHoverChange(null, null, []);
+    }
+  }
+
+  /** Performs the move / attack / skill for the target under the pointer. */
+  private executeAt(e: PointerEvent): void {
     const mode = this.callbacks.getMode();
     const { unitId, cell } = this.pickTarget(e, mode);
     const state = this.engine.getState();
@@ -424,6 +505,8 @@ export class InputManager {
   dispose(): void {
     this.canvas.removeEventListener('pointermove', this.handlePointerMoveBound);
     this.canvas.removeEventListener('pointerdown', this.handlePointerDownBound);
+    this.canvas.removeEventListener('pointerup', this.handlePointerUpBound);
+    this.canvas.removeEventListener('pointercancel', this.handlePointerCancelBound);
     this.canvas.removeEventListener('pointerleave', this.handlePointerLeaveBound);
     this.canvas.removeEventListener('contextmenu', this.handleContextMenuBound);
   }

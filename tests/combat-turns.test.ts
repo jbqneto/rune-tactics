@@ -17,11 +17,11 @@ const open = new GridSystem(8, []);
 
 describe('UnitFactory', () => {
   it.each([
-    ['knight', knightAt, { name: 'Guerreiro', maxHp: 12, moveRange: 3, damage: 2, armor: 1, attackRange: 1 }, 'runic-strike'],
-    ['archer', archerAt, { name: 'Arqueira', maxHp: 8, moveRange: 3, damage: 2, armor: 0, attackRange: 3 }, 'marked-shot'],
-    ['mage', mageAt, { name: 'Mago', maxHp: 7, moveRange: 2, damage: 2, armor: 0, attackRange: 2 }, 'arcane-burst'],
-    ['cleric', clericAt, { name: 'Clérigo', maxHp: 9, moveRange: 2, damage: 2, armor: 1, attackRange: 1 }, 'healing-light'],
-  ] as const)('cria a classe %s com stats e habilidade', (type, at, stats, skillId) => {
+    ['knight', knightAt, { name: 'Knight', maxHp: 12, moveRange: 3, damage: 2, armor: 1, attackRange: 1 }, 'runic-strike'],
+    ['archer', archerAt, { name: 'Archer', maxHp: 8, moveRange: 3, damage: 2, armor: 0, attackRange: 3 }, 'marked-shot'],
+    ['mage', mageAt, { name: 'Mage', maxHp: 7, moveRange: 2, damage: 2, armor: 0, attackRange: 2 }, 'arcane-burst'],
+    ['cleric', clericAt, { name: 'Cleric', maxHp: 9, moveRange: 2, damage: 2, armor: 1, attackRange: 1 }, 'healing-light'],
+  ] as const)('creates class %s with stats and skill', (type, at, stats, skillId) => {
     expect(unit(at(0, 0))).toMatchObject({
       ...stats,
       type,
@@ -44,7 +44,7 @@ describe('UnitFactory', () => {
     ['armored-skeleton', armoredAt, { name: 'Armored Skeleton', maxHp: 11, moveRange: 2, damage: 3, armor: 2, attackRange: 1 }],
     ['goblin-scout', goblinAt, { name: 'Goblin Scout', maxHp: 4, moveRange: 4, damage: 2, armor: 0, attackRange: 1 }],
     ['cultist-mage', cultistAt, { name: 'Cultist Mage', maxHp: 6, moveRange: 2, damage: 3, armor: 0, attackRange: 3 }],
-  ] as const)('cria o inimigo %s sem habilidade', (type, at, stats) => {
+  ] as const)('creates enemy %s without skill', (type, at, stats) => {
     expect(unit(at(0, 0))).toMatchObject({
       ...stats,
       type,
@@ -55,14 +55,14 @@ describe('UnitFactory', () => {
     });
   });
 
-  it('as habilidades têm dano/cura, alcance, recarga e área da V4', () => {
+  it('skills have V4 damage/heal, range, cooldown, and area', () => {
     expect(SKILLS['runic-strike']).toMatchObject({ name: 'Runic Strike', targetTeam: 'enemy', damage: 4, heal: 0, attackKind: 'melee', range: 1, cooldown: 2, area: 'single' });
     expect(SKILLS['marked-shot']).toMatchObject({ name: 'Marked Shot', targetTeam: 'enemy', damage: 3, heal: 0, attackKind: 'ranged', range: 3, cooldown: 2, area: 'single' });
     expect(SKILLS['arcane-burst']).toMatchObject({ name: 'Arcane Burst', targetTeam: 'enemy', damage: 2, heal: 0, attackKind: 'magic', range: 3, cooldown: 3, area: 'cross' });
     expect(SKILLS['healing-light']).toMatchObject({ name: 'Healing Light', targetTeam: 'ally', damage: 0, heal: 3, range: 3, cooldown: 2, area: 'single' });
   });
 
-  it('a batalha inicial tem 4 heróis e os 5 tipos de inimigos', () => {
+  it('initial battle has 4 heroes and the 5 enemy types', () => {
     const units = createUnits();
     expect(units.filter((u) => u.team === 'player').map((u) => u.id)).toEqual([
       'knight-1',
@@ -76,22 +76,22 @@ describe('UnitFactory', () => {
     );
   });
 
-  it('não compartilha a posição com a config', () => {
+  it('does not share position reference with config', () => {
     const [knight] = createUnits();
     knight.pos.x = 11;
     expect(INITIAL_UNITS[0].pos.x).toBe(4);
   });
 });
 
-describe('CombatSystem: ataque básico', () => {
-  it('corpo a corpo alcança só a célula ortogonalmente adjacente', () => {
+describe('CombatSystem: basic attack', () => {
+  it('melee reaches only orthogonally adjacent cells', () => {
     const knight = unit(knightAt(1, 1));
     expect(canAttack(knight, unit(meleeAt(1, 2)), open)).toBe(true);
     expect(canAttack(knight, unit(meleeAt(2, 2)), open)).toBe(false);
     expect(canAttack(knight, unit(meleeAt(1, 3)), open)).toBe(false);
   });
 
-  it('só permite atacar inimigo vivo, com atacante vivo que ainda não atacou', () => {
+  it('only allows attacking a living enemy, with a living attacker that has not attacked yet', () => {
     const knight = unit(knightAt(1, 1));
     const skeleton = unit(meleeAt(1, 2));
     expect(canAttack(knight, unit(mageAt(1, 2)), open)).toBe(false);
@@ -100,7 +100,7 @@ describe('CombatSystem: ataque básico', () => {
     expect(canAttack({ ...knight, hasAttacked: true }, skeleton, open)).toBe(false);
   });
 
-  it('ataque à distância vale até o alcance e exige linha de visão', () => {
+  it('ranged attack works up to attackRange and requires line of sight', () => {
     const archer = unit(archerAt(0, 0));
     expect(canAttack(archer, unit(meleeAt(0, 3)), open)).toBe(true);
     expect(canAttack(archer, unit(meleeAt(2, 1)), open)).toBe(true);
@@ -111,20 +111,20 @@ describe('CombatSystem: ataque básico', () => {
     expect(canAttack(archer, target, new GridSystem(8, [crate(0, 1)]))).toBe(true);
   });
 
-  it('unidades não bloqueiam a linha de visão', () => {
+  it('units do not block line of sight', () => {
     const archer = unit(archerAt(0, 0));
     const target = unit(meleeAt(0, 2));
     expect(canAttack(archer, target, open)).toBe(true);
-    // O guerreiro em (0,1) está no meio da linha e o tiro passa mesmo assim.
+    // Knight at (0,1) is in the middle of the line and the shot still passes through.
     expect(open.hasLineOfSight(archer.pos, target.pos)).toBe(true);
   });
 
-  it('corpo a corpo ignora linha de visão', () => {
+  it('melee ignores line of sight', () => {
     const grid = new GridSystem(8, [wall(0, 1), wall(2, 1)]);
     expect(canAttack(unit(knightAt(1, 1)), unit(meleeAt(1, 2)), grid)).toBe(true);
   });
 
-  it('aplica dano fixo, marca o atacante e informa se é à distância', () => {
+  it('applies fixed damage, marks attacker, and reports whether it is ranged', () => {
     const knight = unit(knightAt(1, 1));
     const skeleton = unit(meleeAt(1, 2));
     expect(resolveAttack(knight, skeleton)).toEqual([
@@ -154,7 +154,7 @@ describe('CombatSystem: ataque básico', () => {
 });
 
 describe('CombatSystem: habilidades', () => {
-  it('área: uma célula para alvo único, cruz para arcane-burst, sempre dentro da grade', () => {
+  it('area: single cell for single-target, cross for arcane-burst, always within grid', () => {
     expect(getSkillAreaCells(SKILLS['runic-strike'], { x: 3, y: 3 }, open)).toEqual([{ x: 3, y: 3 }]);
     expect(getSkillAreaCells(SKILLS['marked-shot'], { x: 3, y: 3 }, open)).toEqual([{ x: 3, y: 3 }]);
 
@@ -200,14 +200,14 @@ describe('CombatSystem: habilidades', () => {
     expect(knight).toMatchObject({ hasAttacked: true, skillCooldown: 2 });
   });
 
-  it('Runic Strike só alcança inimigo adjacente', () => {
+  it('Runic Strike only reaches an adjacent enemy', () => {
     const knight = unit(knightAt(1, 1));
     const near = unit(meleeAt(1, 2));
     const far = unit(meleeAt(1, 4, 'melee-skeleton-2'));
     expect(getSkillTargetCells(knight, [knight, near, far], open)).toEqual([{ x: 1, y: 2 }]);
   });
 
-  it('Marked Shot: 3 de dano a até 3 células, com linha de visão', () => {
+  it('Marked Shot: 3 damage up to 3 cells away, with line of sight', () => {
     const archer = unit(archerAt(0, 0));
     const skeleton = unit(boneArcherAt(0, 3));
     const units = [archer, skeleton];
@@ -226,7 +226,7 @@ describe('CombatSystem: habilidades', () => {
     expect(isValidSkillTarget(unit(archerAt(0, 0)), skill, out.pos, [out], open)).toBe(false);
   });
 
-  it('Arcane Burst: 2 de dano na célula alvo e nas adjacentes, sem ferir aliados', () => {
+  it('Arcane Burst: 2 damage on target cell and adjacent cells, without harming allies', () => {
     const mage = unit(mageAt(0, 1));
     const knight = unit(knightAt(1, 1));
     const center = unit(meleeAt(2, 1, 'center'));
@@ -253,12 +253,12 @@ describe('CombatSystem: habilidades', () => {
 
     expect([center.hp, right.hp, up.hp]).toEqual([3, 3, 10]);
     expect([diagonal.hp, far.hp]).toEqual([5, 5]);
-    // O guerreiro está em (1,1), dentro da cruz, e não é ferido.
+    // Knight is at (1,1), inside the cross, and is not harmed.
     expect(knight.hp).toBe(12);
     expect(mage).toMatchObject({ hp: 7, hasAttacked: true, skillCooldown: 3 });
   });
 
-  it('Arcane Burst mata e ignora quem já está morto', () => {
+  it('Arcane Burst kills and ignores units that are already dead', () => {
     const mage = unit(mageAt(0, 0));
     const weak = unit(meleeAt(2, 0, 'weak'), { hp: 2 });
     const dead = unit(meleeAt(2, 1, 'dead'), { hp: 0, alive: false });
@@ -268,18 +268,18 @@ describe('CombatSystem: habilidades', () => {
     expect(weak.alive).toBe(false);
   });
 
-  it('Arcane Burst pode mirar uma célula vazia desde que a área pegue um inimigo', () => {
+  it('Arcane Burst can target an empty cell as long as the area hits an enemy', () => {
     const mage = unit(mageAt(0, 0));
     const skeleton = unit(meleeAt(3, 1));
     const cells = getSkillTargetCells(mage, [mage, skeleton], open);
-    // (2,1) e (3,0) estão a 3 do mago e encostam no esqueleto; (3,1) está a 4.
+    // (2,1) and (3,0) are 3 steps from mage and adjacent to the skeleton; (3,1) is 4 steps away.
     expect(cells).toContainEqual({ x: 2, y: 1 });
     expect(cells).toContainEqual({ x: 3, y: 0 });
     expect(cells).not.toContainEqual({ x: 3, y: 1 });
     expect(cells).not.toContainEqual({ x: 1, y: 0 });
   });
 
-  it('célula alvo não pode ser obstáculo, a própria célula, nem ficar sem linha de visão', () => {
+  it('target cell cannot be an obstacle, the caster cell itself, or lack line of sight', () => {
     const mage = unit(mageAt(0, 0));
     const skeleton = unit(meleeAt(0, 3));
     const units = [mage, skeleton];
@@ -293,7 +293,7 @@ describe('CombatSystem: habilidades', () => {
     expect(isValidSkillTarget(mage, skill, mage.pos, [mage, adjacent], open)).toBe(false);
   });
 
-  it('sem células alvo se a unidade já atacou, está em recarga, morreu ou não tem habilidade', () => {
+  it('no target cells if the unit already attacked, is on cooldown, died, or has no skill', () => {
     const skeleton = unit(meleeAt(1, 2));
     const cellsFor = (overrides: object) => {
       const knight = unit(knightAt(1, 1), overrides);
@@ -306,7 +306,7 @@ describe('CombatSystem: habilidades', () => {
     expect(getSkillTargetCells(skeleton, [unit(knightAt(1, 1)), skeleton], open)).toEqual([]);
   });
 
-  it('Healing Light: cura aliado ferido (e o próprio lançador) até maxHp, respeitando LoS e ignorando mortos', () => {
+  it('Healing Light: heals injured ally (and caster itself) up to maxHp, respecting LoS and ignoring dead units', () => {
     const cleric = unit(clericAt(0, 0), { hp: 7 });
     const knight = unit(knightAt(0, 2), { hp: 8 });
     const fullArcher = unit(archerAt(1, 0));
@@ -346,7 +346,7 @@ describe('CombatSystem: habilidades', () => {
 describe('TurnSystem: ordem fixa intercalada (V2.1)', () => {
   const squad = () => [unit(knightAt(0, 0)), unit(mageAt(1, 0)), unit(meleeAt(7, 7)), unit(armoredAt(6, 7))];
 
-  it('gera ordem fixa intercalada e percorre até virar a rodada', () => {
+  it('generates fixed interleaved order and advances until round wraps', () => {
     const turns = new TurnSystem();
     const units = [unit(knightAt(0, 0)), unit(meleeAt(7, 7)), unit(armoredAt(6, 7))];
     turns.reset(units);
@@ -383,7 +383,7 @@ describe('TurnSystem: ordem fixa intercalada (V2.1)', () => {
       2,
     ]);
 
-    // 3. armored-skeleton-1 termina -> vira rodada 2 e volta ao índice 0
+    // 3. armored-skeleton-1 ends -> wraps to round 2 and returns to index 0
     expect(turns.advanceTurn(units[2], units)).toEqual([
       { type: 'activationEnded', unitId: 'armored-skeleton-1' },
       { type: 'roundStarted', round: 2 },
@@ -400,7 +400,7 @@ describe('TurnSystem: ordem fixa intercalada (V2.1)', () => {
     expect(units.every((u) => !u.hasMoved && !u.hasAttacked && !u.hasActivatedThisRound)).toBe(true);
   });
 
-  it('pula unidades mortas sem reordenar turnOrder e reduz recarga só na virada de rodada', () => {
+  it('skips dead units without reordering turnOrder and reduces cooldown only on round wrap', () => {
     const turns = new TurnSystem();
     const units = [unit(knightAt(0, 0)), unit(meleeAt(7, 7))];
     turns.reset(units);
@@ -419,7 +419,7 @@ describe('TurnSystem: ordem fixa intercalada (V2.1)', () => {
     expect(units[0]).toMatchObject({ skillCooldown: 1, hasMoved: false, hasActivatedThisRound: false });
   });
 
-  it('vitória ou derrota têm prioridade imediata', () => {
+  it('victory or defeat takes immediate priority', () => {
     const turns = new TurnSystem();
     const units = squad();
     turns.reset(units);
@@ -436,7 +436,7 @@ describe('TurnSystem: ordem fixa intercalada (V2.1)', () => {
     expect(turns.advanceTurn(units[0], units)).toEqual([]);
   });
 
-  it('reset restaura rodada 1 e índice 0', () => {
+  it('reset restores round 1 and index 0', () => {
     const turns = new TurnSystem();
     const units = squad();
     turns.reset(units);

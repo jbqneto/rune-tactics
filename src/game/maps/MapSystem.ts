@@ -1,7 +1,7 @@
 import type { MapConfig, UnitSpawn } from '../../config/gameConfig';
 import type { GridCoord, ObstacleDef } from '../../shared/types';
 
-/** PRNG determinístico Mulberry32 a partir de uma semente inteira. */
+/** Deterministic Mulberry32 PRNG from an integer seed. */
 export function createRng(seed: number): () => number {
   let state = seed >>> 0;
   return () => {
@@ -21,8 +21,8 @@ function shuffle<T>(items: T[], rng: () => number): T[] {
 }
 
 /**
- * Sorteia um mapa de `maps` garantindo que não repita `previousMapId`
- * quando houver pelo menos 2 mapas e `fixedMapId` não estiver definido.
+ * Picks a map from `maps` ensuring it does not repeat `previousMapId`
+ * when there are at least 2 maps and `fixedMapId` is not set.
  */
 export function pickMap(
   maps: readonly MapConfig[],
@@ -62,8 +62,8 @@ function collectFreeRowCells(
 }
 
 /**
- * Sorteia posições iniciais para aliados (`playerSpawnRows`) e inimigos (`enemySpawnRows`)
- * sem sobrepor obstáculos ou outras unidades, preservando a ordem exata da lista de spawns.
+ * Randomly assigns starting positions for allies (`playerSpawnRows`) and enemies (`enemySpawnRows`)
+ * without overlapping obstacles or other units, preserving the exact order of the spawns list.
  */
 export function randomizeUnitSpawns(
   spawns: readonly UnitSpawn[],
@@ -82,11 +82,11 @@ export function randomizeUnitSpawns(
   return spawns.map((spawn) => {
     if (spawn.team === 'player') {
       const pos = playerCells[pIdx++];
-      if (!pos) throw new Error('Espaço insuficiente nas linhas de spawn do jogador.');
+      if (!pos) throw new Error('Insufficient space in player spawn rows.');
       return { ...spawn, pos: { ...pos } };
     }
     const pos = enemyCells[eIdx++];
-    if (!pos) throw new Error('Espaço insuficiente nas linhas de spawn dos inimigos.');
+    if (!pos) throw new Error('Insufficient space in enemy spawn rows.');
     return { ...spawn, pos: { ...pos } };
   });
 }

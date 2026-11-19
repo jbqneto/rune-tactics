@@ -30,11 +30,11 @@ export const unit = (spawn: UnitSpawn, overrides: Partial<UnitState> = {}): Unit
   ...overrides,
 });
 
-/** Roda a fase inimiga até sair de `enemy_activation` e devolve os eventos de cada passo executado. */
+/** Runs the enemy phase until leaving `enemy_activation` and returns events for each executed step. */
 export function runEnemyTurn(engine: IGameEngine): GameEvent[][] {
   const steps: GameEvent[][] = [];
   for (let i = 0; engine.getState().turnState === 'enemy_activation'; i++) {
-    if (i > 100) throw new Error('ativação inimiga não termina');
+    if (i > 100) throw new Error('enemy activation did not terminate');
     const acted = engine.executeNextEnemyAction();
     const evs = engine.consumeEvents();
     if (acted || evs.length > 0) steps.push(evs);

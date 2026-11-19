@@ -6,16 +6,24 @@ import {
   UNIT_STATS,
 } from '../config/gameConfig';
 import type { InteractionMode } from '../input/InputManager';
+import { watchModalOverlays } from './modalFocus';
+import { wireLandscapeButtons } from './mobileLandscape';
 import type {
   AttackKind,
   AttributeKey,
   CampaignHeroProgress,
   CampaignState,
+  GameMode,
   GameStateSnapshot,
   Phase,
   UnitState,
   UnitType,
 } from '../shared/types';
+
+export interface MapViewerEntry {
+  id: string;
+  name: string;
+}
 
 export interface HudCallbacks {
   onSelectUnit: (unitId: string) => void;
@@ -31,19 +39,27 @@ export interface HudCallbacks {
   onAllocateAttribute: (heroId: string, attr: AttributeKey) => void;
   onAdvanceStage: () => void;
   onRestartStageCheckpoint: () => void;
+  onOpenMapViewer?: () => void;
+  onSelectViewerMap?: (mapId: string) => void;
+  onExitMapViewer?: () => void;
+  onPvPBattle?: () => void;
+  onForfeit?: () => void;
+  onRequestRematch?: () => void;
 }
 
+const isDevEnv = import.meta.env.ENVIRONMENT === 'development';
+
 const PHASE_LABELS: Record<Phase, string> = {
-  player: 'Jogador',
-  enemy: 'Inimigos',
-  victory: 'Vitória',
-  defeat: 'Derrota',
+  player: 'Player',
+  enemy: 'Enemies',
+  victory: 'Victory',
+  defeat: 'Defeat',
 };
 
 const ATTACK_KIND_LABELS: Record<AttackKind, string> = {
-  melee: 'Físico',
-  ranged: 'Distância',
-  magic: 'Mágico',
+  melee: 'Melee',
+  ranged: 'Ranged',
+  magic: 'Magic',
 };
 
 const ATTRIBUTE_LABELS: Record<AttributeKey, string> = {
@@ -56,19 +72,19 @@ const ATTRIBUTE_LABELS: Record<AttributeKey, string> = {
 const ATTRIBUTE_KEYS: readonly AttributeKey[] = ['str', 'dex', 'int', 'fort'];
 
 const UNIT_CLASS_LABELS: Record<UnitType, string> = {
-  knight: 'Cavaleiro',
-  archer: 'Arqueira',
-  mage: 'Mago',
-  cleric: 'Clérigo',
-  'melee-skeleton': 'Esqueleto',
-  'skeleton-archer': 'Arqueiro Esqueleto',
-  'armored-skeleton': 'Esqueleto Blindado',
-  'goblin-scout': 'Batedor Goblin',
-  'cultist-mage': 'Mago Cultista',
-  'goblin-stalker': 'Espreitador Goblin',
-  'skeleton-shieldbearer': 'Escudeiro Esqueleto',
-  'necromancer-acolyte': 'Acólito Necromante',
-  'ashen-guardian': 'Guardião das Cinzas',
+  knight: 'Knight',
+  archer: 'Archer',
+  mage: 'Mage',
+  cleric: 'Cleric',
+  'melee-skeleton': 'Skeleton',
+  'skeleton-archer': 'Skeleton Archer',
+  'armored-skeleton': 'Armored Skeleton',
+  'goblin-scout': 'Goblin Scout',
+  'cultist-mage': 'Cultist Mage',
+  'goblin-stalker': 'Goblin Stalker',
+  'skeleton-shieldbearer': 'Skeleton Shieldbearer',
+  'necromancer-acolyte': 'Necromancer Acolyte',
+  'ashen-guardian': 'Ashen Guardian',
 };
 
 const ICON_MOVE = `<svg class="hud-action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 19h14v-3l-4-2-1-6H8l1 6-4 2v3z"/><path d="M8 8V5h5v3"/></svg>`;
@@ -79,7 +95,7 @@ const ICON_END_TURN = `<svg class="hud-action-icon" viewBox="0 0 24 24" fill="no
 
 function getAttributeGainPreview(hero: CampaignHeroProgress, attr: AttributeKey): string {
   const cur = hero.attributes[attr];
-  if (cur >= MAX_ATTRIBUTE) return 'Máximo';
+  if (cur >= MAX_ATTRIBUTE) return 'Max';
 
   const next = cur + 1;
   if (attr === 'fort') {
@@ -87,7 +103,7 @@ function getAttributeGainPreview(hero: CampaignHeroProgress, attr: AttributeKey)
     const defCur = Math.floor(Math.max(0, cur - ATTRIBUTE_BASE_THRESHOLD) / 4);
     const defNext = Math.floor(Math.max(0, next - ATTRIBUTE_BASE_THRESHOLD) / 4);
     const parts: string[] = [];
-    if (hpGain > 0) parts.push(`+${hpGain} HP máx`);
+    if (hpGain > 0) parts.push(`+${hpGain} Max HP`);
     if (defNext > defCur) parts.push('+1 DEF');
     return parts.length > 0 ? parts.join(', ') : `Base (${next}/${ATTRIBUTE_BASE_THRESHOLD})`;
   }
@@ -101,21 +117,25 @@ function getAttributeGainPreview(hero: CampaignHeroProgress, attr: AttributeKey)
     (stats.attackKind === 'magic' && attr === 'int');
 
   if (offNext > offCur) {
-    if (hero.type === 'cleric' && attr === 'int') return '+1 Cura/Magia';
-    return isMainAttr ? '+1 ATK' : '+1 Bônus';
+    if (hero.type === 'cleric' && attr === 'int') return '+1 Heal/Magic';
+    return isMainAttr ? '+1 ATK' : '+1 Bonus';
   }
 
   const progress = Math.max(0, next - ATTRIBUTE_BASE_THRESHOLD) % 3;
-  return `${progress}/3 p/ +1`;
+  return `${progress}/3 to +1`;
 }
 
 export class HudManager {
   readonly healthBarsLayer: HTMLDivElement;
 
   private readonly callbacks: HudCallbacks;
+  private readonly hudTopEl: HTMLDivElement;
+  private readonly hudBottomEl: HTMLDivElement;
   private readonly heroRosterEl: HTMLDivElement;
   private readonly turnOrderTrackEl: HTMLDivElement;
+  private readonly turnOrderOverflowEl: HTMLSpanElement;
   private readonly mapLabelEl: HTMLSpanElement;
+  private readonly subtitleEl: HTMLParagraphElement;
   private readonly mapNameEl: HTMLSpanElement;
   private readonly phaseBadge: HTMLSpanElement;
   private readonly roundValue: HTMLSpanElement;
@@ -124,8 +144,15 @@ export class HudManager {
   private readonly countdownBannerEl: HTMLDivElement;
   private readonly countdownValueEl: HTMLSpanElement;
   private readonly countdownFillEl: HTMLDivElement;
+  private readonly enemyTitleEl: HTMLSpanElement;
   private readonly enemyCountEl: HTMLSpanElement;
   private readonly enemyListEl: HTMLDivElement;
+  private readonly pvpPauseBannerEl: HTMLDivElement;
+  private readonly pvpPauseTextEl: HTMLSpanElement;
+  private readonly pvpReconnectingBannerEl: HTMLDivElement;
+  private readonly pvpReconnectingTextEl: HTMLSpanElement;
+  private currentMode: 'quick-battle' | 'campaign' | 'pvp' = 'quick-battle';
+  private pvpOpponentInfo: { displayName?: string; actorType?: 'human' | 'mcp-agent' | string } | null = null;
   private readonly unitCardEl: HTMLDivElement;
   private readonly moveBtn: HTMLButtonElement;
   private readonly attackBtn: HTMLButtonElement;
@@ -147,6 +174,11 @@ export class HudManager {
   private readonly btnContinueCampaign: HTMLButtonElement;
   private readonly continueCampaignStageEl: HTMLSpanElement;
   private readonly btnQuickBattle: HTMLButtonElement;
+  private readonly btnPvPBattle: HTMLButtonElement;
+  private readonly btnMapViewer: HTMLButtonElement | null;
+  private readonly mapViewerBarEl: HTMLDivElement | null;
+  private readonly mapViewerListEl: HTMLDivElement | null;
+  private readonly btnExitMapViewer: HTMLButtonElement | null;
 
   private readonly campOverlay: HTMLDivElement;
   private readonly campSubtitleEl: HTMLParagraphElement;
@@ -170,18 +202,18 @@ export class HudManager {
       <div class="hud-top">
         <div class="hud-left-col">
           <div class="hud-panel hud-title-card">
-            <h1 class="hud-title">Rune Tactics <span class="hud-version">V4</span></h1>
+            <h1 class="hud-title">Rune Tactics <span class="hud-version">V6</span></h1>
             <p class="hud-subtitle">THE ASHEN CAMPAIGN</p>
           </div>
 
           <div class="hud-panel hud-allies-panel">
-            <div class="hud-section-title">Aliados</div>
+            <div class="hud-section-title">Allies</div>
             <div id="hud-hero-roster" class="hud-hero-roster"></div>
           </div>
 
           <div id="hud-countdown-banner" class="hud-panel hud-countdown-banner hidden" aria-live="polite">
             <div class="hud-countdown-header">
-              <span class="hud-countdown-label">⏱ Tempo do Turno</span>
+              <span class="hud-countdown-label">⏱ Turn Timer</span>
               <span id="hud-countdown-value" class="hud-countdown-value">60s</span>
             </div>
             <div class="hud-countdown-track">
@@ -191,9 +223,9 @@ export class HudManager {
         </div>
 
         <div class="hud-center-top">
-          <div id="hud-turn-order" class="hud-panel hud-turn-order" aria-label="Ordem de turno">
-            <span class="hud-turn-order-label">Ordem de Turno</span>
+          <div id="hud-turn-order" class="hud-panel hud-turn-order" aria-label="Turn order">
             <div id="hud-turn-order-track" class="hud-turn-order-track"></div>
+            <span id="hud-turn-order-overflow" class="hud-turn-overflow hidden"></span>
           </div>
           <div id="hud-combat-feedback" class="hud-combat-feedback hidden"></div>
         </div>
@@ -201,26 +233,26 @@ export class HudManager {
         <div class="hud-top-right">
           <div class="hud-panel hud-turn-card">
             <div class="hud-turn-row">
-              <span id="hud-map-label" class="hud-label">Mapa</span>
+              <span id="hud-map-label" class="hud-label">Map</span>
               <span id="hud-map-name" class="hud-map-name">—</span>
             </div>
             <div class="hud-turn-row">
-              <span class="hud-label">Turno</span>
-              <span id="hud-phase" class="hud-phase-badge">Jogador</span>
+              <span class="hud-label">Turn</span>
+              <span id="hud-phase" class="hud-phase-badge">Player</span>
             </div>
             <div class="hud-turn-row">
               <span class="hud-label">Round</span>
               <span id="hud-round" class="hud-round-value">1</span>
             </div>
             <div id="hud-timer-row" class="hud-turn-row">
-              <span class="hud-label">Tempo</span>
+              <span class="hud-label">Time</span>
               <span id="hud-timer-value" class="hud-turn-timer-val">60s</span>
             </div>
             <div class="hud-turn-card-actions" data-interactive>
               <button id="btn-reset" class="hud-btn hud-btn-secondary hud-btn-sm" type="button">
-                Reiniciar
+                Restart
               </button>
-              <button id="btn-open-menu" class="hud-btn hud-btn-secondary hud-btn-sm" type="button" title="Voltar ao seletor de modo">
+              <button id="btn-open-menu" class="hud-btn hud-btn-secondary hud-btn-sm" type="button" title="Return to mode selector">
                 Menu
               </button>
             </div>
@@ -228,7 +260,7 @@ export class HudManager {
             <div class="hud-divider"></div>
 
             <div class="hud-enemies-header">
-              <span class="hud-section-title">Inimigos</span>
+              <span id="hud-enemies-title" class="hud-section-title">Enemies</span>
               <span id="hud-enemy-count" class="hud-enemy-count">0 / 0</span>
             </div>
             <div id="hud-enemy-list" class="hud-enemy-list"></div>
@@ -241,34 +273,36 @@ export class HudManager {
 
         <div class="hud-action-bar-wrap" data-interactive>
           <div id="hud-controls-status" class="hud-controls-status hidden">
-            Vez dos inimigos
+            Enemy turn
           </div>
           <div class="hud-panel hud-action-bar">
-            <button id="btn-move" class="hud-action-btn hud-action-btn--move" type="button" title="Mover unidade ativa">
+            <button id="btn-move" class="hud-action-btn hud-action-btn--move" type="button" title="Move active unit">
               ${ICON_MOVE}
-              <span>Mover</span>
+              <span>Move</span>
             </button>
-            <button id="btn-attack" class="hud-action-btn hud-action-btn--attack" type="button" title="Ataque básico">
+            <button id="btn-attack" class="hud-action-btn hud-action-btn--attack" type="button" title="Basic attack">
               ${ICON_ATTACK}
-              <span>Atacar</span>
+              <span>Attack</span>
             </button>
             <button id="btn-skill" class="hud-action-btn hud-action-btn--skill" type="button">
               <img id="skill-btn-icon" src="/assets/icons/runic-strike.png" alt="" class="hud-action-icon" />
-              <span id="skill-btn-label">Habilidade</span>
+              <span id="skill-btn-label">Skill</span>
               <span id="skill-btn-cd" class="hud-skill-cd hidden"></span>
             </button>
-            <button id="btn-defend" class="hud-action-btn hud-action-btn--defend" type="button" aria-keyshortcuts="G" title="Postura defensiva: reduz dano recebido em 50% até sua próxima ativação (G)">
+            <button id="btn-defend" class="hud-action-btn hud-action-btn--defend" type="button" aria-keyshortcuts="G" title="Defensive stance: reduces incoming damage by 50% until your next activation (G)">
               ${ICON_DEFEND}
-              <span>Defender (G)</span>
+              <span>Defend</span>
+              <kbd class="hud-hotkey" aria-hidden="true">G</kbd>
             </button>
-            <button id="btn-undo-move" class="hud-action-btn hud-action-btn--undo" type="button" title="Desfazer movimento">
+            <button id="btn-undo-move" class="hud-action-btn hud-action-btn--undo" type="button" title="Undo move">
               ${ICON_UNDO}
-              <span>Desfazer movimento</span>
+              <span>Undo move</span>
             </button>
             <div class="hud-action-sep" aria-hidden="true"></div>
-            <button id="btn-end-turn" class="hud-action-btn hud-action-btn--end" type="button" aria-keyshortcuts="E" title="Encerrar turno (E)">
+            <button id="btn-end-turn" class="hud-action-btn hud-action-btn--end" type="button" aria-keyshortcuts="E" title="End turn (E)">
               ${ICON_END_TURN}
-              <span>Encerrar turno (E)</span>
+              <span>End turn</span>
+              <kbd class="hud-hotkey" aria-hidden="true">E</kbd>
             </button>
           </div>
         </div>
@@ -276,56 +310,105 @@ export class HudManager {
         <div class="hud-bottom-spacer"></div>
       </div>
 
+      <div id="hud-pvp-pause-banner" class="hud-pvp-banner hud-pvp-pause-banner hidden" role="alert">
+        <div class="hud-pvp-banner-content">
+          <span class="hud-pvp-banner-icon">⚠️</span>
+          <span id="hud-pvp-pause-text">Opponent disconnected — Match paused (90s reconnect window)</span>
+        </div>
+      </div>
+      <div id="hud-pvp-reconnecting-banner" class="hud-pvp-banner hud-pvp-reconnecting-banner hidden" role="alert">
+        <div class="hud-pvp-banner-content">
+          <div class="hud-pvp-spinner-sm"></div>
+          <span id="hud-pvp-reconnecting-text">Connection lost — reconnecting...</span>
+        </div>
+      </div>
+
       <div class="hud-viewport-warning" role="status">
         <div class="hud-panel hud-viewport-card">
-          <h2>Janela muito estreita</h2>
-          <p>Rune Tactics V4 foi projetado para desktop com largura mínima de 1024 px.</p>
+          <div class="hud-rotate-icon" aria-hidden="true">⟳</div>
+          <h2>Rotate to landscape</h2>
+          <p>Rune Tactics is played in landscape. Turn your phone sideways, or widen the window.</p>
+          <button id="btn-landscape-fullscreen" class="hud-btn hud-btn-primary hidden" type="button">
+            Play fullscreen in landscape
+          </button>
         </div>
       </div>
 
-      <!-- Menu Inicial / Seletor de Modo -->
+      <!-- Main Menu / Mode Selector -->
       <div id="hud-mode-menu" class="hud-overlay hidden" data-interactive>
         <div class="hud-modal hud-menu-modal">
-          <div class="hud-menu-badge">V4 • THE ASHEN CAMPAIGN</div>
+          <div class="hud-menu-badge">THE ASHEN CAMPAIGN • PvE &amp; PvP</div>
           <h2 class="hud-modal-title hud-menu-title">Rune Tactics</h2>
-          <p class="hud-modal-subtitle">Escolha seu modo de jogo</p>
+          <p class="hud-modal-subtitle">Choose your game mode</p>
           <div class="hud-menu-actions">
             <button id="btn-new-campaign" class="hud-btn hud-btn-primary hud-btn-lg hud-menu-btn" type="button">
-              <span class="hud-menu-btn-title">Nova Campanha</span>
-              <span class="hud-menu-btn-desc">5 fases progressivas, evolução e chefe final</span>
+              <span class="hud-menu-btn-title">New Campaign</span>
+              <span class="hud-menu-btn-desc">5 progressive stages, hero upgrades, and final boss</span>
             </button>
             <button id="btn-continue-campaign" class="hud-btn hud-btn-secondary hud-btn-lg hud-menu-btn" type="button">
-              <span class="hud-menu-btn-title">Continuar Campanha</span>
-              <span id="hud-continue-stage" class="hud-menu-btn-desc">Nenhum save encontrado</span>
+              <span class="hud-menu-btn-title">Continue Campaign</span>
+              <span id="hud-continue-stage" class="hud-menu-btn-desc">No save found</span>
             </button>
             <button id="btn-quick-battle" class="hud-btn hud-btn-secondary hud-btn-lg hud-menu-btn" type="button">
-              <span class="hud-menu-btn-title">Batalha Rápida</span>
-              <span class="hud-menu-btn-desc">Combate avulso com mapas sorteados</span>
+              <span class="hud-menu-btn-title">Quick Battle</span>
+              <span class="hud-menu-btn-desc">Standalone skirmish with randomized maps</span>
             </button>
+            <button id="btn-pvp-battle" class="hud-btn hud-btn-secondary hud-btn-lg hud-menu-btn" type="button">
+              <span class="hud-menu-btn-title">Multiplayer PvP (3v3)</span>
+              <span class="hud-menu-btn-desc">Online tactical match against another player</span>
+            </button>
+            ${
+              isDevEnv
+                ? `<button id="btn-map-viewer" class="hud-btn hud-btn-secondary hud-btn-lg hud-menu-btn hud-menu-btn--dev" type="button">
+              <span class="hud-menu-btn-title">Map Viewer (Dev)</span>
+              <span class="hud-menu-btn-desc">Inspect 3D scenarios and obstacles for all maps</span>
+            </button>`
+                : ''
+            }
           </div>
+          <button id="btn-menu-fullscreen" class="hud-btn hud-btn-secondary hud-btn-sm hud-menu-fullscreen hidden" type="button">
+            Fullscreen (landscape)
+          </button>
         </div>
       </div>
 
-      <!-- Acampamento & Evolução entre Fases -->
+      ${
+        isDevEnv
+          ? `<div id="hud-map-viewer-bar" class="hud-panel hud-map-viewer-bar hidden" data-interactive>
+        <div class="hud-map-viewer-header">
+          <div class="hud-map-viewer-title-wrap">
+            <span class="hud-map-viewer-badge">Map Viewer (Dev)</span>
+            <span class="hud-map-viewer-hint">Right-drag to rotate 360° • Scroll to zoom</span>
+          </div>
+          <button id="btn-exit-map-viewer" class="hud-btn hud-btn-secondary hud-btn-sm" type="button">
+            Exit Map Viewer
+          </button>
+        </div>
+        <div id="hud-map-viewer-list" class="hud-map-viewer-list"></div>
+      </div>`
+          : ''
+      }
+
+      <!-- Camp & Evolution between Stages -->
       <div id="hud-camp-overlay" class="hud-overlay hidden" data-interactive>
         <div class="hud-modal hud-camp-modal">
-          <div class="hud-menu-badge">ACAMPAMENTO & EVOLUÇÃO</div>
-          <h2 class="hud-modal-title is-victory">Fase Concluída!</h2>
+          <div class="hud-menu-badge">CAMP & UPGRADES</div>
+          <h2 class="hud-modal-title is-victory">Stage Complete!</h2>
           <p id="hud-camp-subtitle" class="hud-modal-subtitle"></p>
           <div id="hud-camp-heroes" class="hud-camp-heroes"></div>
           <p id="hud-camp-hint" class="hud-camp-hint"></p>
           <div class="hud-modal-actions">
             <button id="btn-advance-stage" class="hud-btn hud-btn-primary hud-btn-lg" type="button">
-              Iniciar Próxima Fase
+              Start Next Stage
             </button>
           </div>
         </div>
       </div>
 
-      <!-- Resultado de Batalha / Vitória Final / Derrota -->
+      <!-- Battle Result / Final Victory / Defeat -->
       <div id="hud-result-overlay" class="hud-overlay hidden" data-interactive>
         <div class="hud-modal">
-          <h2 id="hud-result-title" class="hud-modal-title">Vitória!</h2>
+          <h2 id="hud-result-title" class="hud-modal-title">Victory!</h2>
           <p id="hud-result-subtitle" class="hud-modal-subtitle"></p>
           <div id="hud-result-actions" class="hud-modal-actions"></div>
         </div>
@@ -333,9 +416,13 @@ export class HudManager {
     `;
 
     this.healthBarsLayer = container.querySelector('#health-bars') as HTMLDivElement;
+    this.hudTopEl = container.querySelector('.hud-top') as HTMLDivElement;
+    this.hudBottomEl = container.querySelector('.hud-bottom') as HTMLDivElement;
     this.heroRosterEl = container.querySelector('#hud-hero-roster') as HTMLDivElement;
     this.turnOrderTrackEl = container.querySelector('#hud-turn-order-track') as HTMLDivElement;
+    this.turnOrderOverflowEl = container.querySelector('#hud-turn-order-overflow') as HTMLSpanElement;
     this.mapLabelEl = container.querySelector('#hud-map-label') as HTMLSpanElement;
+    this.subtitleEl = container.querySelector('.hud-subtitle') as HTMLParagraphElement;
     this.mapNameEl = container.querySelector('#hud-map-name') as HTMLSpanElement;
     this.phaseBadge = container.querySelector('#hud-phase') as HTMLSpanElement;
     this.roundValue = container.querySelector('#hud-round') as HTMLSpanElement;
@@ -344,8 +431,18 @@ export class HudManager {
     this.countdownBannerEl = container.querySelector('#hud-countdown-banner') as HTMLDivElement;
     this.countdownValueEl = container.querySelector('#hud-countdown-value') as HTMLSpanElement;
     this.countdownFillEl = container.querySelector('#hud-countdown-fill') as HTMLDivElement;
+    this.enemyTitleEl = container.querySelector('#hud-enemies-title') as HTMLSpanElement;
     this.enemyCountEl = container.querySelector('#hud-enemy-count') as HTMLSpanElement;
     this.enemyListEl = container.querySelector('#hud-enemy-list') as HTMLDivElement;
+    watchModalOverlays(container);
+    wireLandscapeButtons([
+      container.querySelector<HTMLElement>('#btn-landscape-fullscreen'),
+      container.querySelector<HTMLElement>('#btn-menu-fullscreen'),
+    ]);
+    this.pvpPauseBannerEl = container.querySelector('#hud-pvp-pause-banner') as HTMLDivElement;
+    this.pvpPauseTextEl = container.querySelector('#hud-pvp-pause-text') as HTMLSpanElement;
+    this.pvpReconnectingBannerEl = container.querySelector('#hud-pvp-reconnecting-banner') as HTMLDivElement;
+    this.pvpReconnectingTextEl = container.querySelector('#hud-pvp-reconnecting-text') as HTMLSpanElement;
     this.unitCardEl = container.querySelector('#hud-unit-card') as HTMLDivElement;
     this.moveBtn = container.querySelector('#btn-move') as HTMLButtonElement;
     this.attackBtn = container.querySelector('#btn-attack') as HTMLButtonElement;
@@ -366,6 +463,11 @@ export class HudManager {
     this.btnContinueCampaign = container.querySelector('#btn-continue-campaign') as HTMLButtonElement;
     this.continueCampaignStageEl = container.querySelector('#hud-continue-stage') as HTMLSpanElement;
     this.btnQuickBattle = container.querySelector('#btn-quick-battle') as HTMLButtonElement;
+    this.btnPvPBattle = container.querySelector('#btn-pvp-battle') as HTMLButtonElement;
+    this.btnMapViewer = container.querySelector('#btn-map-viewer') as HTMLButtonElement | null;
+    this.mapViewerBarEl = container.querySelector('#hud-map-viewer-bar') as HTMLDivElement | null;
+    this.mapViewerListEl = container.querySelector('#hud-map-viewer-list') as HTMLDivElement | null;
+    this.btnExitMapViewer = container.querySelector('#btn-exit-map-viewer') as HTMLButtonElement | null;
 
     this.campOverlay = container.querySelector('#hud-camp-overlay') as HTMLDivElement;
     this.campSubtitleEl = container.querySelector('#hud-camp-subtitle') as HTMLParagraphElement;
@@ -384,16 +486,26 @@ export class HudManager {
     this.defendBtn.addEventListener('click', () => this.callbacks.onDefend());
     this.undoMoveBtn.addEventListener('click', () => this.callbacks.onUndoMove());
     this.endTurnBtn.addEventListener('click', () => this.callbacks.onEndTurn());
-    this.resetBtn.addEventListener('click', () => this.callbacks.onReset());
+    this.resetBtn.addEventListener('click', () => {
+      if (this.currentMode === 'pvp') {
+        this.callbacks.onForfeit?.();
+      } else {
+        this.callbacks.onReset();
+      }
+    });
     this.menuBtn.addEventListener('click', () => this.callbacks.onOpenMenu());
 
     this.btnNewCampaign.addEventListener('click', () => this.callbacks.onNewCampaign());
     this.btnContinueCampaign.addEventListener('click', () => this.callbacks.onContinueCampaign());
     this.btnQuickBattle.addEventListener('click', () => this.callbacks.onQuickBattle());
+    this.btnPvPBattle.addEventListener('click', () => this.callbacks.onPvPBattle?.());
+    this.btnMapViewer?.addEventListener('click', () => this.callbacks.onOpenMapViewer?.());
+    this.btnExitMapViewer?.addEventListener('click', () => this.callbacks.onExitMapViewer?.());
     this.btnAdvanceStage.addEventListener('click', () => this.callbacks.onAdvanceStage());
   }
 
   showModeMenu(savedCampaign: CampaignState | null): void {
+    this.hideMapViewer();
     this.campOverlay.classList.add('hidden');
     this.resultOverlay.classList.add('hidden');
     this.modeMenuOverlay.classList.remove('hidden');
@@ -404,14 +516,14 @@ export class HudManager {
       const stageName = stageCfg ? ` — ${stageCfg.name}` : '';
       const statusNote =
         savedCampaign.status === 'between_stages'
-          ? ' (Acampamento)'
+          ? ' (Camp)'
           : savedCampaign.status === 'completed'
-            ? ' (Concluída)'
+            ? ' (Completed)'
             : '';
-      this.continueCampaignStageEl.textContent = `Fase ${savedCampaign.currentStage}/5${stageName}${statusNote}`;
+      this.continueCampaignStageEl.textContent = `Stage ${savedCampaign.currentStage}/5${stageName}${statusNote}`;
     } else {
       this.btnContinueCampaign.disabled = true;
-      this.continueCampaignStageEl.textContent = 'Nenhum save encontrado';
+      this.continueCampaignStageEl.textContent = 'No save found';
     }
   }
 
@@ -419,7 +531,35 @@ export class HudManager {
     this.modeMenuOverlay.classList.add('hidden');
   }
 
+  showMapViewer(maps: readonly MapViewerEntry[], selectedMapId: string): void {
+    if (!this.mapViewerBarEl || !this.mapViewerListEl) return;
+    this.hideOverlays();
+    this.hudTopEl.classList.add('hidden');
+    this.hudBottomEl.classList.add('hidden');
+    this.mapViewerBarEl.classList.remove('hidden');
+
+    this.mapViewerListEl.innerHTML = '';
+    for (const map of maps) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = `hud-map-viewer-chip${map.id === selectedMapId ? ' is-active' : ''}`;
+      btn.textContent = map.name;
+      btn.title = map.id;
+      btn.addEventListener('click', () => {
+        this.callbacks.onSelectViewerMap?.(map.id);
+      });
+      this.mapViewerListEl.appendChild(btn);
+    }
+  }
+
+  hideMapViewer(): void {
+    this.mapViewerBarEl?.classList.add('hidden');
+    this.hudTopEl.classList.remove('hidden');
+    this.hudBottomEl.classList.remove('hidden');
+  }
+
   showCampOverlay(campaign: CampaignState, canAdvance: boolean): void {
+    this.hideMapViewer();
     this.modeMenuOverlay.classList.add('hidden');
     this.resultOverlay.classList.add('hidden');
     this.campOverlay.classList.remove('hidden');
@@ -427,13 +567,13 @@ export class HudManager {
     const currentStageCfg = CAMPAIGN_STAGES.find((s) => s.stageNumber === campaign.currentStage);
     const nextStageCfg = CAMPAIGN_STAGES.find((s) => s.stageNumber === campaign.currentStage + 1);
     const currentLabel = currentStageCfg
-      ? `Fase ${currentStageCfg.stageNumber}/5 (${currentStageCfg.name})`
-      : `Fase ${campaign.currentStage}/5`;
+      ? `Stage ${currentStageCfg.stageNumber}/5 (${currentStageCfg.name})`
+      : `Stage ${campaign.currentStage}/5`;
     const nextLabel = nextStageCfg
-      ? `Fase ${nextStageCfg.stageNumber}/5 — ${nextStageCfg.name}`
-      : `Fase ${campaign.currentStage + 1}/5`;
+      ? `Stage ${nextStageCfg.stageNumber}/5 — ${nextStageCfg.name}`
+      : `Stage ${campaign.currentStage + 1}/5`;
 
-    this.campSubtitleEl.textContent = `${currentLabel} concluída → Próxima: ${nextLabel}`;
+    this.campSubtitleEl.textContent = `${currentLabel} complete → Next: ${nextLabel}`;
 
     this.campHeroesEl.innerHTML = '';
     for (const hero of campaign.heroes) {
@@ -459,7 +599,7 @@ export class HudManager {
               data-hero-id="${hero.id}"
               data-attr="${attr}"
               ${disabled ? 'disabled' : ''}
-              title="Aumentar ${ATTRIBUTE_LABELS[attr]}"
+              title="Increase ${ATTRIBUTE_LABELS[attr]}"
             >+</button>
           </div>
         `;
@@ -500,11 +640,11 @@ export class HudManager {
       this.campHeroesEl.appendChild(card);
     }
 
-    this.btnAdvanceStage.textContent = `Iniciar Fase ${campaign.currentStage + 1}`;
+    this.btnAdvanceStage.textContent = `Start Stage ${campaign.currentStage + 1}`;
     this.btnAdvanceStage.disabled = !canAdvance;
     this.campHintEl.textContent = canAdvance
-      ? 'Todos os pontos foram distribuídos. Pronto para avançar!'
-      : 'Distribua os pontos disponíveis de cada herói antes de iniciar a próxima fase.';
+      ? 'All points allocated. Ready to advance!'
+      : 'Allocate all available attribute points for each hero before starting the next stage.';
   }
 
   hideCampOverlay(): void {
@@ -512,17 +652,18 @@ export class HudManager {
   }
 
   showCampaignCompletedOverlay(): void {
+    this.hideMapViewer();
     this.modeMenuOverlay.classList.add('hidden');
     this.campOverlay.classList.add('hidden');
     this.resultOverlay.classList.remove('hidden');
 
-    this.resultTitle.textContent = 'Campanha Concluída!';
+    this.resultTitle.textContent = 'Campaign Complete!';
     this.resultTitle.className = 'hud-modal-title is-victory';
     this.resultSubtitle.textContent =
-      'The Ashen Campaign — O Guardião das Cinzas foi derrotado e o santuário purificado.';
+      'The Ashen Campaign — The Ashen Guardian has been defeated and the sanctuary purified.';
 
     this.renderResultButtons([
-      { label: 'Nova campanha', primary: true, onClick: () => this.callbacks.onNewCampaign() },
+      { label: 'New Campaign', primary: true, onClick: () => this.callbacks.onNewCampaign() },
       { label: 'Menu', primary: false, onClick: () => this.callbacks.onOpenMenu() },
     ]);
   }
@@ -582,45 +723,115 @@ export class HudManager {
     }, 2000);
   }
 
+  setPvPOpponent(info: { displayName?: string; actorType?: 'human' | 'mcp-agent' | string } | null): void {
+    this.pvpOpponentInfo = info;
+    if (this.currentMode === 'pvp') {
+      this.updateOpponentHeader();
+    }
+  }
+
+  private updateOpponentHeader(): void {
+    const isMcp = this.pvpOpponentInfo?.actorType === 'mcp-agent';
+    const mcpBadge = isMcp ? ' <span class="hud-mcp-badge">[MCP]</span>' : '';
+    const baseName = this.pvpOpponentInfo?.displayName && this.pvpOpponentInfo.displayName !== 'Opponent'
+      ? escapeHtml(this.pvpOpponentInfo.displayName)
+      : 'Opponent';
+
+    if (isMcp) {
+      this.enemyTitleEl.innerHTML = `${baseName}${mcpBadge}`;
+    } else {
+      this.enemyTitleEl.textContent = baseName;
+    }
+  }
+
+  setPvPReconnecting(visible: boolean, message = 'Connection lost — reconnecting...'): void {
+    if (!this.pvpReconnectingBannerEl) return;
+    this.pvpReconnectingTextEl.textContent = message;
+    this.pvpReconnectingBannerEl.classList.toggle('hidden', !visible);
+  }
+
+  setPvPPause(visible: boolean, secondsRemaining?: number): void {
+    if (!this.pvpPauseBannerEl) return;
+    if (secondsRemaining !== undefined && secondsRemaining > 0) {
+      this.pvpPauseTextEl.textContent = `Opponent disconnected — Match paused (${Math.ceil(secondsRemaining)}s reconnect window)`;
+    } else {
+      this.pvpPauseTextEl.textContent = 'Opponent disconnected — Match paused (90s reconnect window)';
+    }
+    this.pvpPauseBannerEl.classList.toggle('hidden', !visible);
+  }
+
   update(
     state: GameStateSnapshot,
     mode: InteractionMode,
     isAnimating: boolean,
     hasSkillTargets: boolean
   ): void {
+    this.currentMode = state.mode;
+    const subtitle = hudSubtitleForMode(state.mode);
+    if (this.subtitleEl.textContent !== subtitle) this.subtitleEl.textContent = subtitle;
     const isPlayerTurn = state.turnState === 'player_unit_active';
     const isEnemyPhase = state.turnState === 'enemy_activation';
     const controlsLocked = !isPlayerTurn || isAnimating;
 
     if (state.mode === 'campaign' && state.stageNumber !== undefined && state.stageName) {
-      this.mapLabelEl.textContent = 'Fase';
-      this.mapNameEl.textContent = `Fase ${state.stageNumber}/5 — ${state.stageName}`;
+      this.mapLabelEl.textContent = 'Stage';
+      this.mapNameEl.textContent = `Stage ${state.stageNumber}/5 — ${state.stageName}`;
     } else {
-      this.mapLabelEl.textContent = 'Mapa';
+      this.mapLabelEl.textContent = 'Map';
       this.mapNameEl.textContent = state.mapName;
     }
 
-    this.phaseBadge.textContent = PHASE_LABELS[state.phase];
+    if (state.mode === 'pvp') {
+      if (state.phase === 'player') {
+        this.phaseBadge.textContent = 'Your Turn';
+      } else if (state.phase === 'enemy') {
+        this.phaseBadge.textContent = 'Opponent Turn';
+      } else if (state.phase === 'victory') {
+        this.phaseBadge.textContent = 'Victory!';
+      } else {
+        this.phaseBadge.textContent = 'Defeat!';
+      }
+      this.updateOpponentHeader();
+      this.resetBtn.textContent = 'Forfeit';
+      this.resetBtn.title = 'Forfeit match';
+      this.resetBtn.classList.add('is-forfeit');
+
+      if (state.pvp && !state.pvp.opponentConnected) {
+        this.setPvPPause(true);
+      } else {
+        this.setPvPPause(false);
+      }
+    } else {
+      this.phaseBadge.textContent = PHASE_LABELS[state.phase];
+      this.enemyTitleEl.textContent = 'Enemies';
+      this.resetBtn.textContent = 'Restart';
+      this.resetBtn.title = 'Restart battle';
+      this.resetBtn.classList.remove('is-forfeit');
+      this.setPvPPause(false);
+    }
+
     this.phaseBadge.className = `hud-phase-badge hud-phase--${state.phase}`;
     this.roundValue.textContent = String(state.round);
 
     this.controlsStatusEl.classList.toggle('hidden', !isEnemyPhase);
     this.controlsStatusEl.textContent = isEnemyPhase
-      ? 'Vez dos inimigos'
+      ? state.mode === 'pvp'
+        ? 'Opponent turn'
+        : 'Enemy turn'
       : isAnimating
-        ? 'Executando ação...'
+        ? 'Executing action...'
         : '';
 
     this.renderTurnOrder(state);
 
     const getStatusBadge = (unit: UnitState): { label: string; cls: string } => {
-      if (!unit.alive) return { label: 'DERROTADO', cls: 'is-defeated' };
-      if (unit.id === state.activeUnitId) return { label: 'EM TURNO', cls: 'is-in-turn' };
-      if (unit.hasActivatedThisRound) return { label: 'CONCLUÍDO', cls: 'is-done' };
-      return { label: 'AGUARDANDO', cls: 'is-waiting' };
+      if (!unit.alive) return { label: 'DEFEATED', cls: 'is-defeated' };
+      if (unit.id === state.activeUnitId) return { label: 'ACTIVE', cls: 'is-in-turn' };
+      if (unit.hasActivatedThisRound) return { label: 'DONE', cls: 'is-done' };
+      return { label: 'WAITING', cls: 'is-waiting' };
     };
 
-    // Painel de Aliados (Esquerda — informativo, sem troca manual)
+    // Allies Panel (Left — informational, no manual unit switching)
     const heroes = state.units.filter((u) => u.team === 'player');
     this.heroRosterEl.innerHTML = '';
     for (const hero of heroes) {
@@ -649,8 +860,8 @@ export class HudManager {
           <div class="hud-hero-bottom">
             <span class="hud-hero-status ${cls}">${label}</span>
             <span class="hud-hero-pips">
-              <i class="pip ${movePip}" title="Movimento"></i>
-              <i class="pip ${atkPip}" title="Ataque"></i>
+              <i class="pip ${movePip}" title="Move"></i>
+              <i class="pip ${atkPip}" title="Attack"></i>
             </span>
           </div>
         </div>
@@ -658,7 +869,7 @@ export class HudManager {
       this.heroRosterEl.appendChild(card);
     }
 
-    // Lista compacta de Inimigos (Superior Direito)
+    // Compact Enemy List (Top Right)
     const enemies = state.units.filter((u) => u.team === 'enemy');
     const livingEnemies = enemies.filter((u) => u.alive).length;
     this.enemyCountEl.textContent = `${livingEnemies} / ${enemies.length}`;
@@ -683,7 +894,7 @@ export class HudManager {
       this.enemyListEl.appendChild(item);
     }
 
-    // Card da Unidade Ativa (Inferior Esquerdo)
+    // Active Unit Card (Bottom Left)
     const isBattleOver = state.phase === 'victory' || state.phase === 'defeat';
     const focusId = isBattleOver ? null : (state.activeUnitId ?? state.selectedUnitId);
     const activeUnit = focusId
@@ -703,20 +914,39 @@ export class HudManager {
 
     if (isBattleOver && !isAnimating) {
       const isVictory = state.phase === 'victory';
-      if (state.mode === 'campaign') {
+      if (state.mode === 'pvp') {
+        this.resultOverlay.classList.remove('hidden');
+        this.resultTitle.textContent = isVictory ? 'Victory!' : 'Defeat!';
+        this.resultTitle.className = `hud-modal-title ${isVictory ? 'is-victory' : 'is-defeat'}`;
+        this.resultSubtitle.textContent = isVictory
+          ? 'You defeated your opponent!'
+          : 'Your opponent won the match.';
+        this.renderResultButtons([
+          {
+            label: 'Rematch',
+            primary: true,
+            onClick: () => this.callbacks.onRequestRematch?.(),
+          },
+          {
+            label: 'Back to Menu',
+            primary: false,
+            onClick: () => this.callbacks.onOpenMenu(),
+          },
+        ]);
+      } else if (state.mode === 'campaign') {
         if (!isVictory) {
           this.resultOverlay.classList.remove('hidden');
-          this.resultTitle.textContent = 'Derrota!';
+          this.resultTitle.textContent = 'Defeat!';
           this.resultTitle.className = 'hud-modal-title is-defeat';
-          this.resultSubtitle.textContent = `Todos os heróis caíram na Fase ${state.stageNumber ?? 1}/5 (round ${state.round}).`;
+          this.resultSubtitle.textContent = `All heroes fell on Stage ${state.stageNumber ?? 1}/5 (Round ${state.round}).`;
           this.renderResultButtons([
             {
-              label: 'Reiniciar fase (Checkpoint)',
+              label: 'Restart Stage (Checkpoint)',
               primary: true,
               onClick: () => this.callbacks.onRestartStageCheckpoint(),
             },
             {
-              label: 'Nova campanha',
+              label: 'New Campaign',
               primary: false,
               onClick: () => this.callbacks.onNewCampaign(),
             },
@@ -727,16 +957,16 @@ export class HudManager {
             },
           ]);
         }
-        // Em vitória de campanha, main.ts abre o Acampamento (Fases 1–4) ou Campanha Concluída (Fase 5).
+        // On campaign victory, main.ts opens the Camp (Stages 1–4) or Campaign Complete (Stage 5).
       } else {
         this.resultOverlay.classList.remove('hidden');
-        this.resultTitle.textContent = isVictory ? 'Vitória!' : 'Derrota!';
+        this.resultTitle.textContent = isVictory ? 'Victory!' : 'Defeat!';
         this.resultTitle.className = `hud-modal-title ${isVictory ? 'is-victory' : 'is-defeat'}`;
         this.resultSubtitle.textContent = isVictory
-          ? `Todos os inimigos foram derrotados em ${state.round} round(s).`
-          : `Todos os heróis caíram no round ${state.round}.`;
+          ? `All enemies were defeated in ${state.round} round(s).`
+          : `All heroes fell on round ${state.round}.`;
         this.renderResultButtons([
-          { label: 'Jogar novamente', primary: true, onClick: () => this.callbacks.onReset() },
+          { label: 'Play Again', primary: true, onClick: () => this.callbacks.onReset() },
           { label: 'Menu', primary: false, onClick: () => this.callbacks.onOpenMenu() },
         ]);
       }
@@ -747,19 +977,38 @@ export class HudManager {
 
   private renderTurnOrder(state: GameStateSnapshot): void {
     this.turnOrderTrackEl.innerHTML = '';
+    this.turnOrderOverflowEl.classList.add('hidden');
+    this.turnOrderOverflowEl.textContent = '';
+    this.turnOrderOverflowEl.title = '';
     if (state.turnOrder.length === 0) return;
 
     const unitMap = new Map(state.units.map((u) => [u.id, u]));
     const total = state.turnOrder.length;
-    const maxItems = 8;
+    const maxItems = 6;
     const startIdx = Math.max(0, state.turnIndex % total);
 
+    const livingCount = state.turnOrder.reduce((acc, id) => {
+      const u = unitMap.get(id);
+      return u && u.alive ? acc + 1 : acc;
+    }, 0);
+    if (livingCount === 0) return;
+
+    const itemsToShow = Math.min(maxItems, livingCount);
     let shown = 0;
     let roundSeparatorAdded = false;
+    let wrappedToNextRound = false;
 
-    for (let offset = 0; offset < total * 2 && shown < maxItems; offset++) {
+    for (let offset = 0; offset < total * 2 && shown < itemsToShow; offset++) {
       const rawIndex = startIdx + offset;
-      if (rawIndex >= total && !roundSeparatorAdded) {
+      if (rawIndex >= total) {
+        wrappedToNextRound = true;
+      }
+
+      const unitId = state.turnOrder[rawIndex % total];
+      const unit = unitMap.get(unitId);
+      if (!unit || !unit.alive) continue;
+
+      if (wrappedToNextRound && !roundSeparatorAdded) {
         roundSeparatorAdded = true;
         const sep = document.createElement('div');
         sep.className = 'hud-turn-sep';
@@ -768,11 +1017,7 @@ export class HudManager {
         this.turnOrderTrackEl.appendChild(sep);
       }
 
-      const unitId = state.turnOrder[rawIndex % total];
-      const unit = unitMap.get(unitId);
-      if (!unit || !unit.alive) continue;
-
-      const isCurrent = offset === 0 && unit.id === state.activeUnitId;
+      const isCurrent = shown === 0 && unit.id === state.activeUnitId;
       const item = document.createElement('div');
       item.className = `hud-turn-item hud-turn-item--${unit.team}${isCurrent ? ' is-current' : ''}`;
       item.title = `${unit.name} (${unit.hp}/${unit.maxHp} HP)`;
@@ -782,6 +1027,13 @@ export class HudManager {
       `;
       this.turnOrderTrackEl.appendChild(item);
       shown++;
+    }
+
+    if (livingCount > maxItems) {
+      const extraCount = livingCount - maxItems;
+      this.turnOrderOverflowEl.textContent = `+${extraCount} ›`;
+      this.turnOrderOverflowEl.title = `${extraCount} more unit${extraCount === 1 ? '' : 's'} in turn order`;
+      this.turnOrderOverflowEl.classList.remove('hidden');
     }
   }
 
@@ -795,10 +1047,10 @@ export class HudManager {
     isEnemyPhase: boolean
   ): void {
     const lockReason = isEnemyPhase
-      ? 'Vez dos inimigos'
+      ? 'Enemy turn'
       : isAnimating
-        ? 'Aguarde a animação'
-        : 'Ação indisponível';
+        ? 'Wait for animation'
+        : 'Action unavailable';
 
     const canAct = !controlsLocked && !!selected && !selected.hasActivatedThisRound;
 
@@ -806,17 +1058,17 @@ export class HudManager {
     this.moveBtn.classList.toggle('is-selected', mode === 'default' && !this.moveBtn.disabled);
     this.moveBtn.title = this.moveBtn.disabled
       ? selected?.hasMoved
-        ? 'Já se moveu'
+        ? 'Already moved'
         : lockReason
-      : 'Mover unidade ativa';
+      : 'Move active unit';
 
     this.attackBtn.disabled = !canAct || selected.hasAttacked;
     this.attackBtn.classList.toggle('is-selected', mode === 'attack');
     this.attackBtn.title = this.attackBtn.disabled
       ? selected?.hasAttacked
-        ? 'Já atacou'
+        ? 'Already attacked'
         : lockReason
-      : 'Ataque básico (ou clique em um inimigo para ataque inteligente)';
+      : 'Basic attack (or click an enemy for smart attack)';
 
     if (selected && selected.skillId) {
       const skill = SKILLS[selected.skillId];
@@ -824,8 +1076,8 @@ export class HudManager {
       this.skillBtn.style.display = 'flex';
       this.skillIconEl.src = skill.icon ?? '/assets/icons/runic-strike.png';
       this.skillLabelEl.textContent = skill.name;
-      const effectLabel = skill.heal > 0 ? `Cura: ${skill.heal}` : `Dano: ${skill.damage}`;
-      const areaLabel = skill.area === 'cross' ? 'Cruz (5 células)' : 'Alvo único';
+      const effectLabel = skill.heal > 0 ? `Heal: ${skill.heal}` : `Damage: ${skill.damage}`;
+      const areaLabel = skill.area === 'cross' ? 'Cross (5 cells)' : 'Single target';
       this.skillBtn.classList.toggle('is-heal-skill', isHeal);
 
       if (selected.skillCooldown > 0) {
@@ -847,18 +1099,18 @@ export class HudManager {
         const why = controlsLocked
           ? lockReason
           : selected.hasAttacked
-            ? 'Já atacou nesta ativação'
+            ? 'Already acted this activation'
             : selected.skillCooldown > 0
-              ? `Em recarga: ${selected.skillCooldown} rodada(s)`
-              : 'Nenhum alvo válido';
+              ? `On cooldown: ${selected.skillCooldown} round(s)`
+              : 'No valid targets';
         this.skillBtn.title = `${skill.name} — ${why}`;
       } else {
-        this.skillBtn.title = `${skill.name} — ${effectLabel} | Alcance: ${skill.range} | Área: ${areaLabel} | Recarga: ${skill.cooldown}t`;
+        this.skillBtn.title = `${skill.name} — ${effectLabel} | Range: ${skill.range} | Area: ${areaLabel} | Cooldown: ${skill.cooldown}t`;
       }
     } else {
       this.skillBtn.disabled = true;
       this.skillBtn.classList.remove('is-selected', 'is-heal-skill');
-      this.skillLabelEl.textContent = 'Habilidade';
+      this.skillLabelEl.textContent = 'Skill';
       this.skillCdEl.classList.add('hidden');
       this.skillBtn.title = lockReason;
     }
@@ -866,17 +1118,17 @@ export class HudManager {
     this.defendBtn.disabled = !canAct || selected.hasAttacked;
     this.defendBtn.title = this.defendBtn.disabled
       ? selected?.hasAttacked
-        ? 'Já agiu nesta ativação'
+        ? 'Already acted this activation'
         : lockReason
-      : 'Postura defensiva: reduz dano recebido em 50% até sua próxima ativação (G)';
+      : 'Defensive stance: reduces incoming damage by 50% until your next activation (G)';
 
     this.undoMoveBtn.disabled = !canUndoMove || isAnimating;
     this.undoMoveBtn.title = this.undoMoveBtn.disabled
-      ? 'Nenhum movimento para desfazer'
-      : 'Desfazer último movimento desta ativação';
+      ? 'No move to undo'
+      : 'Undo last move of this activation';
 
     this.endTurnBtn.disabled = !canAct;
-    this.endTurnBtn.title = this.endTurnBtn.disabled ? lockReason : 'Encerrar turno (E)';
+    this.endTurnBtn.title = this.endTurnBtn.disabled ? lockReason : 'End turn (E)';
   }
 
   private renderUnitCard(unit: UnitState | null, activeUnitId: string | null): void {
@@ -884,8 +1136,8 @@ export class HudManager {
     if (!unit) {
       this.unitCardEl.innerHTML = `
         <div class="hud-unit-empty">
-          <strong>Batalha encerrada</strong>
-          <span>Use as opções da tela de resultado para continuar.</span>
+          <strong>Battle ended</strong>
+          <span>Use the result screen options to continue.</span>
         </div>
       `;
       return;
@@ -902,10 +1154,10 @@ export class HudManager {
 
     const badgesHtml = [
       unit.isGuarding
-        ? '<span class="hud-unit-badge hud-unit-badge--guard">🛡 Postura Defensiva (-50%)</span>'
+        ? '<span class="hud-unit-badge hud-unit-badge--guard" title="Defensive Stance: -50% incoming damage">GUARD -50%</span>'
         : '',
       unit.bossPhase === 2
-        ? '<span class="hud-unit-badge hud-unit-badge--boss">🔥 Fase 2: Fúria das Cinzas</span>'
+        ? '<span class="hud-unit-badge hud-unit-badge--boss" title="Ashen Fury: Phase II">PHASE II</span>'
         : '',
     ]
       .filter(Boolean)
@@ -916,7 +1168,7 @@ export class HudManager {
         <div class="hud-unit-skill-row">
           <span class="hud-unit-skill">${unit.skillName}</span>
           <span class="hud-unit-skill-cd">${
-            unit.skillCooldown > 0 ? `Recarga: ${unit.skillCooldown}t` : 'Pronta'
+            unit.skillCooldown > 0 ? `Cooldown: ${unit.skillCooldown}t` : 'Ready'
           }</span>
         </div>
       `
@@ -926,10 +1178,10 @@ export class HudManager {
       ? `
         <div class="hud-unit-actions">
           <span class="action-pill ${unit.hasMoved ? 'is-used' : 'is-ready'}">
-            <i class="pill-dot"></i>Movimento: ${unit.hasMoved ? 'Usado' : 'Disponível'}
+            <i class="pill-dot"></i>Move: ${unit.hasMoved ? 'Used' : 'Ready'}
           </span>
           <span class="action-pill ${unit.hasAttacked ? 'is-used' : 'is-ready'}">
-            <i class="pill-dot"></i>Ataque: ${unit.hasAttacked ? 'Usado' : 'Disponível'}
+            <i class="pill-dot"></i>Attack: ${unit.hasAttacked ? 'Used' : 'Ready'}
           </span>
         </div>
       `
@@ -937,11 +1189,13 @@ export class HudManager {
 
     this.unitCardEl.innerHTML = `
       <div class="hud-unit-card-inner hud-class--${unit.type}">
-        <img src="${unit.portraitPath ?? ''}" alt="${unit.name}" class="hud-unit-portrait hud-unit-portrait--${unit.team}" />
+        <div class="hud-unit-portrait-frame hud-unit-portrait-frame--${unit.team}">
+          <img src="${unit.portraitPath ?? ''}" alt="${unit.name}" class="hud-unit-portrait hud-unit-portrait--${unit.team}" />
+        </div>
         <div class="hud-unit-body">
           <div class="hud-unit-header">
             <span class="hud-unit-name">${unit.name}</span>
-            <span class="hud-unit-class">${classLabel}</span>
+            <span class="hud-unit-class hud-unit-crest hud-unit-crest--${unit.team}">${classLabel}</span>
           </div>
           <div class="hud-unit-hp-row">
             <div class="hud-mini-track">
@@ -953,7 +1207,7 @@ export class HudManager {
             <div><span>ATK (${attackKindLabel})</span><strong>${unit.damage}</strong></div>
             <div><span>DEF</span><strong>${unit.armor}</strong></div>
             <div><span>MOV</span><strong>${unit.moveRange}</strong></div>
-            <div><span>ALC</span><strong>${unit.attackRange}</strong></div>
+            <div><span>RNG</span><strong>${unit.attackRange}</strong></div>
           </div>
           <div class="hud-unit-attrs">
             <span>STR <strong>${unit.attributes.str}</strong></span>
@@ -968,4 +1222,24 @@ export class HudManager {
       </div>
     `;
   }
+}
+
+const HUD_SUBTITLES: Record<GameMode, string> = {
+  campaign: 'THE ASHEN CAMPAIGN',
+  'quick-battle': 'QUICK BATTLE',
+  pvp: 'ONLINE PVP • 3v3',
+};
+
+/** Header subtitle for the active game mode. */
+export function hudSubtitleForMode(mode: GameMode): string {
+  return HUD_SUBTITLES[mode];
+}
+
+function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
 }

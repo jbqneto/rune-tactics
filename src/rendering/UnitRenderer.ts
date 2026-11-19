@@ -24,6 +24,7 @@ interface UnitVisual {
   weaponPivot: THREE.Group;
   weaponRestRotX: number;
   baseRing: THREE.Mesh;
+  contactShadow: THREE.Mesh;
   shieldAura: THREE.Mesh;
   bossEmberAura: THREE.Mesh | null;
   hitbox: THREE.Mesh;
@@ -169,33 +170,67 @@ export class UnitRenderer {
   private currentAnim: ActiveAnimation | null = null;
   private latestUnits: UnitState[] = [];
   private latestSelectedId: string | null = null;
+  private latestActiveUnitId: string | null = null;
   private latestTurnOrder: string[] = [];
+  private isPvP = false;
+  private isBattleActive = false;
   private needsInitialFacing = false;
   private latestCamera: THREE.Camera | null = null;
   private animClock = 0;
+  private readonly activeTurnCursor: THREE.Group;
 
   constructor(scene: THREE.Scene, board: BoardRenderer, hpContainer: HTMLElement) {
     this.scene = scene;
     this.board = board;
     this.hpContainer = hpContainer;
+    this.activeTurnCursor = this.createActiveTurnCursor();
+    this.activeTurnCursor.visible = false;
+    this.scene.add(this.activeTurnCursor);
   }
 
   get isAnimating(): boolean {
     return this.currentAnim !== null || this.queue.length > 0;
   }
 
+  /** Clears all unit visuals, HP bars, and active/queued animations. */
+  clear(): void {
+    this.cleanupActiveVfx();
+    this.currentAnim = null;
+    this.queue.length = 0;
+    this.latestActiveUnitId = null;
+    this.activeTurnCursor.visible = false;
+    this.syncUnits([], null, [], null);
+  }
+
+  setPvPMode(isPvP: boolean, isBattleActive = true): void {
+    this.isPvP = isPvP;
+    this.isBattleActive = isBattleActive;
+  }
+
   syncUnits(
     units: UnitState[],
     selectedUnitId: string | null,
     turnOrder?: string[],
-    activeUnitId?: string | null
+    activeUnitId?: string | null,
+    isPvP?: boolean,
+    isBattleActive?: boolean
   ): void {
+    if (isPvP !== undefined) {
+      this.isPvP = isPvP;
+    }
+    if (isBattleActive !== undefined) {
+      this.isBattleActive = isBattleActive;
+    }
     this.latestUnits = units;
     this.latestSelectedId = selectedUnitId;
+    if (activeUnitId !== undefined) {
+      this.latestActiveUnitId = activeUnitId;
+    }
     if (turnOrder) {
       this.latestTurnOrder = turnOrder;
     }
-    const highlightActiveId = activeUnitId !== undefined ? activeUnitId : selectedUnitId;
+    const highlightActiveId =
+      activeUnitId !== undefined ? activeUnitId : (this.latestActiveUnitId ?? selectedUnitId);
     const incomingIds = new Set(units.map((u) => u.id));
     for (const [id, oldVisual] of this.visuals) {
       if (!incomingIds.has(id)) {
@@ -237,10 +272,19 @@ export class UnitRenderer {
 
       if (unit.alive) {
         visual.deathClipPlayed = false;
-        const targetOpacity =
-          unit.team === 'enemy' || unit.id === highlightActiveId
-            ? ACTIVE_UNIT_OPACITY
-            : INACTIVE_UNIT_OPACITY;
+        let targetOpacity: number;
+        if (this.isPvP) {
+          if (this.isBattleActive) {
+            targetOpacity = unit.id === highlightActiveId ? ACTIVE_UNIT_OPACITY : INACTIVE_UNIT_OPACITY;
+          } else {
+            targetOpacity = ACTIVE_UNIT_OPACITY;
+          }
+        } else {
+          targetOpacity =
+            unit.team === 'enemy' || unit.id === highlightActiveId
+              ? ACTIVE_UNIT_OPACITY
+              : INACTIVE_UNIT_OPACITY;
+        }
         this.setUnitOpacity(visual, targetOpacity);
       } else if (unit.team === 'player') {
         this.setUnitOpacity(visual, INACTIVE_UNIT_OPACITY);
@@ -256,6 +300,7 @@ export class UnitRenderer {
           visual.bodyGroup.rotation.set(0, visual.facingYaw, 0);
           visual.bodyGroup.position.set(0, 0, 0);
           visual.baseRing.visible = true;
+          visual.contactShadow.visible = true;
           visual.hpBarEl.style.display = 'flex';
         } else {
           if (visual.controller.hasGlb) {
@@ -271,6 +316,7 @@ export class UnitRenderer {
             visual.bodyGroup.position.set(0, 0.22, 0);
           }
           visual.baseRing.visible = false;
+          visual.contactShadow.visible = false;
           visual.hpBarEl.style.display = 'none';
         }
       }
@@ -284,10 +330,13 @@ export class UnitRenderer {
         this.cleanupActiveVfx();
         this.queue.length = 0;
         this.currentAnim = null;
+        this.latestActiveUnitId = null;
+        this.activeTurnCursor.visible = false;
         this.needsInitialFacing = true;
         for (const visual of this.visuals.values()) {
           visual.root.visible = true;
           visual.baseRing.visible = true;
+          visual.contactShadow.visible = true;
           visual.isGuarding = false;
           visual.shieldAura.visible = false;
           visual.bossPhase = undefined;
@@ -354,7 +403,7 @@ export class UnitRenderer {
           continue;
         }
         if (ev.skillId !== undefined) {
-          // Habilidade já possui skillVfx próprio: não enfileirar segundo projétil.
+          // Skill already has its own skillVfx: do not enqueue a second projectile.
           const pendingSkill = [...this.queue]
             .reverse()
             .find((a): a is Extract<ActiveAnimation, { kind: 'skillVfx' }> => a.kind === 'skillVfx' && a.skillId === ev.skillId);
@@ -497,8 +546,33 @@ export class UnitRenderer {
 
     const pulse = 0.5 + 0.5 * Math.sin(this.animClock * 4.2);
 
+    const activeVisual = this.latestActiveUnitId
+      ? this.visuals.get(this.latestActiveUnitId)
+      : undefined;
+    if (activeVisual && activeVisual.alive && activeVisual.root.visible) {
+      const baseHeight = activeVisual.type === 'ashen-guardian' ? 2.25 : 1.85;
+      const bob = Math.sin(this.animClock * 3.5) * 0.08;
+      this.activeTurnCursor.position.set(
+        activeVisual.root.position.x,
+        activeVisual.root.position.y + baseHeight + bob,
+        activeVisual.root.position.z
+      );
+      this.activeTurnCursor.rotation.y = this.animClock * 1.6;
+      this.activeTurnCursor.visible = true;
+    } else {
+      this.activeTurnCursor.visible = false;
+    }
+
     for (const visual of this.visuals.values()) {
       visual.controller.update(dt);
+      if (visual.alive && visual.id === this.latestActiveUnitId && visual.baseRing.visible) {
+        const ringScale = 1 + pulse * 0.12;
+        visual.baseRing.scale.set(ringScale, 1, ringScale);
+        const ringMat = visual.baseRing.material as THREE.MeshBasicMaterial;
+        ringMat.opacity = 0.72 + pulse * 0.28;
+      } else {
+        visual.baseRing.scale.set(1, 1, 1);
+      }
       if (visual.shieldAura.visible) {
         const auraScale = 1 + pulse * 0.08;
         visual.shieldAura.scale.set(auraScale, 1, auraScale);
@@ -754,7 +828,7 @@ export class UnitRenderer {
     group.position.copy(targetPos);
 
     if (skillId === 'arcane-burst') {
-      // Onda circular expansiva + partículas radiais + flash central
+      // Expanding circular shockwave + radial particles + central flash
       const ringGeo = new THREE.RingGeometry(0.28, 0.52, 24);
       ringGeo.rotateX(-Math.PI / 2);
       const ringMat = new THREE.MeshBasicMaterial({
@@ -1326,7 +1400,7 @@ export class UnitRenderer {
 
       if (!anim.textShown && progress >= 0.15 && boss) {
         anim.textShown = true;
-        this.spawnFloatingText(boss.root.position, '🔥 Fúria das Cinzas!', 'damage');
+        this.spawnFloatingText(boss.root.position, '🔥 Ashen Fury!', 'damage');
       }
 
       if (boss) {
@@ -1389,6 +1463,7 @@ export class UnitRenderer {
           this.setUnitOpacity(visual, INACTIVE_UNIT_OPACITY);
         }
         visual.baseRing.visible = false;
+        visual.contactShadow.visible = false;
         visual.hpBarEl.style.display = 'none';
         this.finishCurrentAnimation();
       }
@@ -1615,6 +1690,44 @@ export class UnitRenderer {
     }
   }
 
+  private createActiveTurnCursor(): THREE.Group {
+    const group = new THREE.Group();
+    group.raycast = () => {};
+
+    const chevronGeo = new THREE.ConeGeometry(0.14, 0.26, 4);
+    chevronGeo.rotateX(Math.PI);
+    const chevronMat = new THREE.MeshStandardMaterial({
+      color: 0xfacc15,
+      emissive: 0xd97706,
+      emissiveIntensity: 0.45,
+      roughness: 0.25,
+      metalness: 0.65,
+    });
+    const chevron = new THREE.Mesh(chevronGeo, chevronMat);
+    chevron.castShadow = false;
+    chevron.receiveShadow = false;
+    chevron.raycast = () => {};
+    group.add(chevron);
+
+    const haloGeo = new THREE.RingGeometry(0.18, 0.23, 24);
+    haloGeo.rotateX(-Math.PI / 2);
+    const haloMat = new THREE.MeshBasicMaterial({
+      color: 0xfde047,
+      transparent: true,
+      opacity: 0.85,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    const halo = new THREE.Mesh(haloGeo, haloMat);
+    halo.position.y = 0.08;
+    halo.castShadow = false;
+    halo.receiveShadow = false;
+    halo.raycast = () => {};
+    group.add(halo);
+
+    return group;
+  }
+
   private createUnitVisual(unit: UnitState): UnitVisual {
     const root = new THREE.Group();
     const bodyGroup = new THREE.Group();
@@ -1637,6 +1750,20 @@ export class UnitRenderer {
     const baseRing = new THREE.Mesh(ringGeo, ringMat);
     baseRing.position.y = 0.024;
     root.add(baseRing);
+
+    const shadowGeo = new THREE.CircleGeometry(0.36, 16);
+    shadowGeo.rotateX(-Math.PI / 2);
+    const shadowMat = new THREE.MeshBasicMaterial({
+      color: 0x000000,
+      transparent: true,
+      opacity: 0.3,
+      depthWrite: false,
+    });
+    const contactShadow = new THREE.Mesh(shadowGeo, shadowMat);
+    contactShadow.position.y = 0.012;
+    contactShadow.raycast = () => {};
+    contactShadow.visible = unit.alive;
+    root.add(contactShadow);
 
     const shieldGeo = new THREE.RingGeometry(0.41, 0.49, 24);
     shieldGeo.rotateX(-Math.PI / 2);
@@ -1740,6 +1867,7 @@ export class UnitRenderer {
       weaponPivot,
       weaponRestRotX,
       baseRing,
+      contactShadow,
       shieldAura,
       bossEmberAura,
       hitbox,
@@ -2413,7 +2541,7 @@ export class UnitRenderer {
     });
     flash.push(charcoalArmor, crimsonArmor, emberMat);
 
-    // ~1.4x maior que unidades padrão
+    // ~1.4x larger than standard units
     bodyGroup.scale.setScalar(1.4);
 
     const legGeo = new THREE.BoxGeometry(0.15, 0.26, 0.16);

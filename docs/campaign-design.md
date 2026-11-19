@@ -1,27 +1,27 @@
-# Design da Campanha — Rune Tactics V4 (The Ashen Campaign)
+# Campaign Design — Rune Tactics V4 (The Ashen Campaign)
 
-Este documento especifica a estrutura das 5 fases sequenciais (`StageConfig`), os dois mapas novos (`forgotten-swamp` e `corrupted-sanctuary`), o fluxo completo de campanha, recuperação entre fases, evolução dos heróis, checkpoint, persistência versionada em `localStorage` e separação do modo **Batalha Rápida**.
-
----
-
-## 1. Separação de Modos: Campanha vs. Batalha Rápida
-
-O jogo oferece dois modos explícitos (`GameMode = 'campaign' | 'quick-battle'`):
-
-1. **Campanha (`The Ashen Campaign`)**:
-   - Sequência fixa de 5 fases (`StageConfig[]` em `src/config/gameConfig.ts`).
-   - Heróis persistem atributos (`str`, `dex`, `int`, `fort`) e `hp`/`maxHp` entre as fases, recuperam parcialmente após vitórias, evoluem `+1` ponto por herói por fase vencida e contam com checkpoint por fase e save automático em `localStorage`.
-   - As formações inimigas de cada fase são fixas/curadas em `StageConfig` (ou com spawns determinísticos fixos da fase) para garantir ritmo tático progressivo.
-2. **Batalha Rápida (`quick-battle`)**:
-   - Preserva integralmente o comportamento da V2.3: sorteio de mapa em `MAPS` sem repetição consecutiva e sorteio das posições iniciais com semente (`seed`).
-   - Os 4 heróis entram com os atributos iniciais padrão da tabela de classes, utilizando as fórmulas de atributo e defesa da V4.
-   - Não lê, não altera e não apaga o save de campanha em `localStorage`.
+This document specifies the structure of the 5 sequential stages (`StageConfig`), the two new maps (`forgotten-swamp` and `corrupted-sanctuary`), the complete campaign flow, recovery between stages, hero progression, checkpoints, versioned persistence in `localStorage`, and separation from the **Quick Battle** mode.
 
 ---
 
-## 2. Estrutura das 5 Fases (`CAMPAIGN_STAGES: StageConfig[]`)
+## 1. Mode Separation: Campaign vs. Quick Battle
 
-Cada fase é declarada em `src/config/gameConfig.ts` pela interface `StageConfig`:
+The game provides two explicit modes (`GameMode = 'campaign' | 'quick-battle'`):
+
+1. **Campaign (`The Ashen Campaign`)**:
+   - Fixed sequence of 5 stages (`StageConfig[]` in `src/config/gameConfig.ts`).
+   - Heroes persist their attributes (`str`, `dex`, `int`, `fort`) and `hp`/`maxHp` across stages, recover partially after victories, gain `+1` point per hero per stage won, and have per-stage checkpoints with automatic `localStorage` persistence.
+   - Enemy formations in each stage are fixed/curated in `StageConfig` (or use fixed deterministic stage spawns) to guarantee progressive tactical pacing.
+2. **Quick Battle (`quick-battle`)**:
+   - Preserves V2.3 behavior intact: randomized map selection from `MAPS` without consecutive repetition and seeded spawn positions (`seed`).
+   - The 4 heroes enter with the default starting attributes from the class table, using the V4 attribute and defense formulas.
+   - Never reads, modifies, or deletes the campaign save in `localStorage`.
+
+---
+
+## 2. Structure of the 5 Stages (`CAMPAIGN_STAGES: StageConfig[]`)
+
+Each stage is declared in `src/config/gameConfig.ts` via the `StageConfig` interface:
 
 ```ts
 export interface StageEnemySpawn {
@@ -48,46 +48,46 @@ export interface StageConfig {
 }
 ```
 
-### Formação Canônica dos Heróis nas Fases
+### Canonical Hero Formation in Stages
 
-Para consistência visual e clareza tática em todas as 5 fases, os 4 heróis nascem nas duas linhas do sul (`playerSpawnRows: [0, 1]`):
+For visual consistency and tactical clarity across all 5 stages, the 4 heroes spawn on the two southern rows (`playerSpawnRows: [0, 1]`):
 
-- `knight-1` (`knight`): `{ x: 4, y: 1 }` (vanguarda centro-esquerda)
-- `cleric-1` (`cleric`): `{ x: 7, y: 1 }` (vanguarda centro-direita / suporte próximo)
-- `archer-1` (`archer`): `{ x: 2, y: 0 }` (retaguarda oeste)
-- `mage-1` (`mage`): `{ x: 9, y: 0 }` (retaguarda leste)
+- `knight-1` (`knight`): `{ x: 4, y: 1 }` (center-left vanguard)
+- `cleric-1` (`cleric`): `{ x: 7, y: 1 }` (center-right vanguard / close support)
+- `archer-1` (`archer`): `{ x: 2, y: 0 }` (west backline)
+- `mage-1` (`mage`): `{ x: 9, y: 0 }` (east backline)
 
-*(Todas as células acima são garantidamente livres de obstáculos em todos os mapas da campanha; caso algum mapa futuro altere spawns, cada `StageConfig` permite `heroSpawns` próprio.)*
-
----
-
-### Fase 1: Posto Avançado (`stage-1-outpost`)
-- **Mapa**: `ruins` ("Ruínas Atuais")
-- **Objetivo**: Introduzir combate tático, linha de visão através da muralha central e postura **Defender**.
-- **Inimigos (3)**:
-  - `goblin-scout-1` (`goblin-scout`): `{ x: 2, y: 10 }` (flanco oeste, portão largo)
-  - `melee-skeleton-1` (`melee-skeleton`): `{ x: 5, y: 10 }` (centro)
-  - `goblin-scout-2` (`goblin-scout`): `{ x: 9, y: 10 }` (flanco leste, passagem estreita)
-- **Ordem de turno intercalada (`buildTurnOrder`)**: `knight-1`, `goblin-scout-1`, `cleric-1`, `melee-skeleton-1`, `archer-1`, `goblin-scout-2`, `mage-1`.
+*(All cells above are guaranteed free of obstacles on all campaign maps; if any future map alters spawns, each `StageConfig` supports its own `heroSpawns`.)*
 
 ---
 
-### Fase 2: Pântano Esquecido (`stage-2-swamp`)
-- **Mapa**: `forgotten-swamp` ("Pântano Esquecido" — **novo mapa**)
-- **Objetivo**: Controlar os 3 gargalos/pontes estreitas contra flanqueadores rápidos e pressão de arqueiro atrás da água.
-- **Inimigos (5)**:
-  - `goblin-stalker-1` (`goblin-stalker`): `{ x: 2, y: 10 }` (alinhado à ponte oeste `x=2`)
-  - `goblin-scout-1` (`goblin-scout`): `{ x: 5, y: 10 }` (ponte central)
-  - `goblin-scout-2` (`goblin-scout`): `{ x: 6, y: 10 }` (ponte central)
-  - `goblin-stalker-2` (`goblin-stalker`): `{ x: 9, y: 10 }` (alinhado à ponte leste `x=9`)
-  - `skeleton-archer-1` (`skeleton-archer`): `{ x: 5, y: 11 }` (retaguarda atirando sobre o pântano)
+### Stage 1: Outpost Ruins (`stage-1-outpost`)
+- **Map**: `ruins` ("Current Ruins")
+- **Objective**: Introduce tactical combat, line of sight across the central wall, and the **Defend** stance.
+- **Enemies (3)**:
+  - `goblin-scout-1` (`goblin-scout`): `{ x: 2, y: 10 }` (west flank, wide gate)
+  - `melee-skeleton-1` (`melee-skeleton`): `{ x: 5, y: 10 }` (center)
+  - `goblin-scout-2` (`goblin-scout`): `{ x: 9, y: 10 }` (east flank, narrow passage)
+- **Interleaved turn order (`buildTurnOrder`)**: `knight-1`, `goblin-scout-1`, `cleric-1`, `melee-skeleton-1`, `archer-1`, `goblin-scout-2`, `mage-1`.
 
 ---
 
-### Fase 3: Fortaleza dos Ossos (`stage-3-fortress`)
-- **Mapa**: `fortress` ("Fortaleza Abandonada")
-- **Objetivo**: Quebrar uma linha de frente defensiva de escudeiros e armadura pesada que bloqueia o corredor central enquanto o arqueiro dispara da retaguarda.
-- **Inimigos (6)**:
+### Stage 2: Forgotten Swamp (`stage-2-swamp`)
+- **Map**: `forgotten-swamp` ("Forgotten Swamp" — **new map**)
+- **Objective**: Hold the 3 narrow bridges/chokepoints against fast flankers and archer pressure across the water.
+- **Enemies (5)**:
+  - `goblin-stalker-1` (`goblin-stalker`): `{ x: 2, y: 10 }` (aligned with west bridge `x=2`)
+  - `goblin-scout-1` (`goblin-scout`): `{ x: 5, y: 10 }` (central bridge)
+  - `goblin-scout-2` (`goblin-scout`): `{ x: 6, y: 10 }` (central bridge)
+  - `goblin-stalker-2` (`goblin-stalker`): `{ x: 9, y: 10 }` (aligned with east bridge `x=9`)
+  - `skeleton-archer-1` (`skeleton-archer`): `{ x: 5, y: 11 }` (backline firing across the swamp)
+
+---
+
+### Stage 3: Fortress of Bones (`stage-3-fortress`)
+- **Map**: `fortress` ("Abandoned Fortress")
+- **Objective**: Break through a defensive frontline of shieldbearers and heavy armor blocking the central corridor while the archer fires from the rear.
+- **Enemies (6)**:
   - `skeleton-shieldbearer-1` (`skeleton-shieldbearer`): `{ x: 4, y: 10 }`
   - `skeleton-shieldbearer-2` (`skeleton-shieldbearer`): `{ x: 7, y: 10 }`
   - `melee-skeleton-1` (`melee-skeleton`): `{ x: 2, y: 10 }`
@@ -97,10 +97,10 @@ Para consistência visual e clareza tática em todas as 5 fases, os 4 heróis na
 
 ---
 
-### Fase 4: Catacumbas Arcanas (`stage-4-catacombs`)
-- **Mapa**: `catacombs` ("Catacumbas Cruzadas")
-- **Objetivo**: Romper as muralhas internas das catacumbas e neutralizar conjuradores (`cultist-mage`) e sustentadores (`necromancer-acolyte`) protegidos por esqueletos blindados.
-- **Inimigos (6)**:
+### Stage 4: Arcane Catacombs (`stage-4-catacombs`)
+- **Map**: `catacombs` ("Crossed Catacombs")
+- **Objective**: Breach the inner catacomb walls and neutralize casters (`cultist-mage`) and healers (`necromancer-acolyte`) shielded by armored skeletons.
+- **Enemies (6)**:
   - `armored-skeleton-1` (`armored-skeleton`): `{ x: 4, y: 10 }`
   - `armored-skeleton-2` (`armored-skeleton`): `{ x: 7, y: 10 }`
   - `cultist-mage-1` (`cultist-mage`): `{ x: 1, y: 11 }`
@@ -110,141 +110,141 @@ Para consistência visual e clareza tática em todas as 5 fases, os 4 heróis na
 
 ---
 
-### Fase 5: Santuário Corrompido (`stage-5-sanctuary`)
-- **Mapa**: `corrupted-sanctuary` ("Santuário Corrompido" — **novo mapa**)
-- **Objetivo**: Derrotar o chefe **Guardião das Cinzas (`ashen-guardian`)** e seus dois guardiões de apoio, evitando ou defendendo seus ataques anunciados (`Golpe das Cinzas` e `Erupção das Cinzas`).
+### Stage 5: Corrupted Sanctuary (`stage-5-sanctuary`)
+- **Map**: `corrupted-sanctuary` ("Corrupted Sanctuary" — **new map**)
+- **Objective**: Defeat the boss **Ashen Guardian (`ashen-guardian`)** and its two support guardians while dodging or defending against its telegraphed attacks (`Ashen Slam` and `Ashen Eruption`).
 - **`isBossStage`**: `true`
-- **Inimigos (3)**:
-  - `skeleton-shieldbearer-1` (`skeleton-shieldbearer`): `{ x: 4, y: 10 }` (vanguarda protetora)
-  - `ashen-guardian-1` (`ashen-guardian`): `{ x: 6, y: 10 }` (chefe centralizado no altar norte)
-  - `necromancer-acolyte-1` (`necromancer-acolyte`): `{ x: 8, y: 11 }` (suporte sombrio na retaguarda)
+- **Enemies (3)**:
+  - `skeleton-shieldbearer-1` (`skeleton-shieldbearer`): `{ x: 4, y: 10 }` (protective vanguard)
+  - `ashen-guardian-1` (`ashen-guardian`): `{ x: 6, y: 10 }` (boss centered at the northern altar)
+  - `necromancer-acolyte-1` (`necromancer-acolyte`): `{ x: 8, y: 11 }` (dark backline support)
 
 ---
 
-## 3. Novos Mapas 12×12 (`MAPS`)
+## 3. New 12×12 Maps (`MAPS`)
 
-Todos os mapas continuam 12×12 planos (`gridSize: 12`), com linhas de spawn `playerSpawnRows: [0, 1]` e `enemySpawnRows: [10, 11]` sem obstáculos e **100% das células livres conectadas entre si** (verificado por BFS).
+All maps remain flat 12×12 grids (`gridSize: 12`), with obstacle-free spawn rows `playerSpawnRows: [0, 1]` and `enemySpawnRows: [10, 11]`, and **100% of free cells mutually connected** (verified via BFS).
 
-Para o pântano, adiciona-se o tipo de obstáculo `'water'` em `ObstacleKind` com **`blocksLos: false`** (bloqueia movimento, permite tiros e magias atravessarem por cima da água). As passagens entre blocos de água podem levar `bridgeCells?: GridCoord[]` em `MapConfig` (campo puramente visual para o `BoardRenderer` desenhar tábuas de madeira sobre o piso da ponte, sem alterar regras de caminho ou altura).
+For the swamp, the `'water'` obstacle type is added to `ObstacleKind` with **`blocksLos: false`** (blocks movement, allows ranged shots and spells to pass over water). Walkways between water blocks may specify `bridgeCells?: GridCoord[]` in `MapConfig` (a purely visual field for `BoardRenderer` to render wooden planks on the bridge floor, without altering pathing or elevation rules).
 
-### 3.1 `forgotten-swamp` ("Pântano Esquecido")
+### 3.1 `forgotten-swamp` ("Forgotten Swamp")
 
-Legenda: `~` água (`water`, `blocksLos: false`); `O` pilar (`blocksLos: true`); `c` caixote (`blocksLos: false`); `b` barril (`blocksLos: false`); `.` célula livre (com tábuas visuais de ponte nas colunas C, F–G e J nas linhas 6 e 7).
+Legend: `~` water (`water`, `blocksLos: false`); `O` pillar (`blocksLos: true`); `c` crate (`blocksLos: false`); `b` barrel (`blocksLos: false`); `.` free cell (with visual bridge planks on columns C, F–G, and J on rows 6 and 7).
 
-```
-12 (y=11)  . . . . . . . . . . . .   (spawn inimigo)
-11 (y=10)  . . . . . . . . . . . .   (spawn inimigo)
-10 (y=9)   . . O . . . . . . O . .   pilares: (2,9), (9,9)
- 9 (y=8)   . b . . c . . c . . b .   barris: (1,8),(10,8); caixotes: (4,8),(7,8)
+```text
+12 (y=11)  . . . . . . . . . . . .   (enemy spawn)
+11 (y=10)  . . . . . . . . . . . .   (enemy spawn)
+10 (y=9)   . . O . . . . . . O . .   pillars: (2,9), (9,9)
+ 9 (y=8)   . b . . c . . c . . b .   barrels: (1,8),(10,8); crates: (4,8),(7,8)
  8 (y=7)   . . . . . . . . . . . .
- 7 (y=6)   ~ ~ . ~ ~ . . ~ ~ . ~ ~   pontes em x=2, x=5..6, x=9
- 6 (y=5)   ~ ~ . ~ ~ . . ~ ~ . ~ ~   pontes em x=2, x=5..6, x=9
+ 7 (y=6)   ~ ~ . ~ ~ . . ~ ~ . ~ ~   bridges at x=2, x=5..6, x=9
+ 6 (y=5)   ~ ~ . ~ ~ . . ~ ~ . ~ ~   bridges at x=2, x=5..6, x=9
  5 (y=4)   . . . . . . . . . . . .
- 4 (y=3)   . b . . c . . c . . b .   barris: (1,3),(10,3); caixotes: (4,3),(7,3)
- 3 (y=2)   . . O . . . . . . O . .   pilares: (2,2), (9,2)
- 2 (y=1)   . . . . . . . . . . . .   (spawn herói)
- 1 (y=0)   . . . . . . . . . . . .   (spawn herói)
+ 4 (y=3)   . b . . c . . c . . b .   barrels: (1,3),(10,3); crates: (4,3),(7,3)
+ 3 (y=2)   . . O . . . . . . O . .   pillars: (2,2), (9,2)
+ 2 (y=1)   . . . . . . . . . . . .   (hero spawn)
+ 1 (y=0)   . . . . . . . . . . . .   (hero spawn)
            A B C D E F G H I J K L
            0 1 2 3 4 5 6 7 8 9 10 11
 ```
 
-- **Total de obstáculos**: 28 (`16 water`, `4 pillar`, `4 crate`, `4 barrel`).
-- **Células livres**: `144 - 28 = 116`, todas conectadas em um único componente.
-- **`bridgeCells` (visuais)**: `{x:2,y:5}, {x:5,y:5}, {x:6,y:5}, {x:9,y:5}, {x:2,y:6}, {x:5,y:6}, {x:6,y:6}, {x:9,y:6}`.
+- **Total obstacles**: 28 (`16 water`, `4 pillar`, `4 crate`, `4 barrel`).
+- **Free cells**: `144 - 28 = 116`, all connected in a single component.
+- **`bridgeCells` (visual)**: `{x:2,y:5}, {x:5,y:5}, {x:6,y:5}, {x:9,y:5}, {x:2,y:6}, {x:5,y:6}, {x:6,y:6}, {x:9,y:6}`.
 
-### 3.2 `corrupted-sanctuary` ("Santuário Corrompido")
+### 3.2 `corrupted-sanctuary` ("Corrupted Sanctuary")
 
-Legenda: `#` parede (`blocksLos: true`); `O` pilar (`blocksLos: true`); `c` caixote (`blocksLos: false`); `b` barril (`blocksLos: false`).
+Legend: `#` wall (`blocksLos: true`); `O` pillar (`blocksLos: true`); `c` crate (`blocksLos: false`); `b` barrel (`blocksLos: false`).
 
-```
-12 (y=11)  . . . . . . . . . . . .   (spawn inimigo)
-11 (y=10)  . . . . . . . . . . . .   (spawn inimigo)
-10 (y=9)   . O . . . . . . . . O .   pilares: (1,9), (10,9)
- 9 (y=8)   . . . # . . . . # . . .   paredes: (3,8), (8,8)
- 8 (y=7)   . . . . . O O . . . . .   pilares centrais do altar: (5,7), (6,7)
- 7 (y=6)   # . . . c . . c . . . #   paredes: (0,6),(11,6); caixotes: (4,6),(7,6)
- 6 (y=5)   # . . . . . . . . . . #   paredes: (0,5),(11,5)
- 5 (y=4)   . . b . . . . . . b . .   barris: (2,4), (9,4)
- 4 (y=3)   . . . # . . . . # . . .   paredes: (3,3), (8,3)
- 3 (y=2)   . O . . c . . c . . O .   pilares: (1,2),(10,2); caixotes: (4,2),(7,2)
- 2 (y=1)   . . . . . . . . . . . .   (spawn herói)
- 1 (y=0)   . . . . . . . . . . . .   (spawn herói)
+```text
+12 (y=11)  . . . . . . . . . . . .   (enemy spawn)
+11 (y=10)  . . . . . . . . . . . .   (enemy spawn)
+10 (y=9)   . O . . . . . . . . O .   pillars: (1,9), (10,9)
+ 9 (y=8)   . . . # . . . . # . . .   walls: (3,8), (8,8)
+ 8 (y=7)   . . . . . O O . . . . .   central altar pillars: (5,7), (6,7)
+ 7 (y=6)   # . . . c . . c . . . #   walls: (0,6),(11,6); crates: (4,6),(7,6)
+ 6 (y=5)   # . . . . . . . . . . #   walls: (0,5),(11,5)
+ 5 (y=4)   . . b . . . . . . b . .   barrels: (2,4), (9,4)
+ 4 (y=3)   . . . # . . . . # . . .   walls: (3,3), (8,3)
+ 3 (y=2)   . O . . c . . c . . O .   pillars: (1,2),(10,2); crates: (4,2),(7,2)
+ 2 (y=1)   . . . . . . . . . . . .   (hero spawn)
+ 1 (y=0)   . . . . . . . . . . . .   (hero spawn)
            A B C D E F G H I J K L
            0 1 2 3 4 5 6 7 8 9 10 11
 ```
 
-- **Total de obstáculos**: 20 (`8 wall`, `6 pillar`, `4 crate`, `2 barrel`).
-- **Células livres**: `144 - 20 = 124`, todas conectadas em um único componente.
-- Nota: `MAPS` em `gameConfig.ts` passa a incluir esses dois mapas junto aos 6 existentes (ou `QUICK_BATTLE_MAP_IDS` continua podendo sortear todos os mapas de `MAPS`, atualizando o teste de lista em `tests/v23-features.test.ts`).
+- **Total obstacles**: 20 (`8 wall`, `6 pillar`, `4 crate`, `2 barrel`).
+- **Free cells**: `144 - 20 = 124`, all connected in a single component.
+- Note: `MAPS` in `gameConfig.ts` includes these two maps alongside the 6 existing ones (and `QUICK_BATTLE_MAP_IDS` can continue rolling across all maps in `MAPS`, updating the list check in `tests/v23-features.test.ts`).
 
 ---
 
-## 4. Fluxo de Campanha, Recuperação, Evolução e Checkpoint
+## 4. Campaign Flow, Recovery, Evolution, and Checkpoints
 
-```
-[Nova Campanha] ──▶ Cria 4 heróis base ──▶ Grava Checkpoint Fase 1 ──▶ [Batalha Fase 1]
+```text
+[New Campaign] ──▶ Create 4 base heroes ──▶ Save Stage 1 Checkpoint ──▶ [Stage 1 Battle]
                                                                               │
-                 ┌────────────────── Derrota ─────────────────────────────────┤
-                 ▼                                                            ▼ Vitória
-      [Modal de Derrota]                                           É a Fase 5 (Chefe)?
-       ├─ Reiniciar Fase ──▶ Restaura Checkpoint da Fase N               ├─ Sim ──▶ [Vitória da Campanha!]
-       └─ Nova Campanha  ──▶ Reseta save e volta à Fase 1                └─ Não ──▶ [Recuperação Pós-Vitória]
+                 ┌────────────────── Defeat ──────────────────────────────────┤
+                 ▼                                                            ▼ Victory
+          [Defeat Modal]                                             Is it Stage 5 (Boss)?
+       ├─ Restart Stage ──▶ Restore Stage N Checkpoint               ├─ Yes ──▶ [Campaign Victory!]
+       └─ New Campaign  ──▶ Clear save & return to Stage 1           └─ No  ──▶ [Post-Victory Recovery]
                                                                                        │
                                                                                        ▼
-                                                                             +1 Ponto / Herói
+                                                                             +1 Point / Hero
                                                                                        │
                                                                                        ▼
-                                                                           [Tela de Acampamento]
-                                                                           (Distribui atributos)
+                                                                               [Camp Screen]
+                                                                            (Allocate attributes)
                                                                                        │
-                                                                                       ▼ Confirmar
-                                                                        Grava Checkpoint Fase N+1
+                                                                                       ▼ Confirm
+                                                                        Save Stage N+1 Checkpoint
                                                                                        │
                                                                                        ▼
-                                                                             [Batalha Fase N+1]
+                                                                            [Stage N+1 Battle]
 ```
 
-### 4.1 Recuperação Entre Fases (Fases 1 → 4)
+### 4.1 Recovery Between Stages (Stages 1 → 4)
 
-Constantes em `src/config/gameConfig.ts`:
+Constants in `src/config/gameConfig.ts`:
 - `CAMPAIGN_ALIVE_HEAL_RATIO = 0.35`
 - `CAMPAIGN_REVIVE_HP_RATIO = 0.25`
 - `CAMPAIGN_POINTS_PER_VICTORY = 1`
 
-Ao vencer a fase `N` (`N < 5`), captura-se o `hp` e `alive` finais de cada herói no `GameStateSnapshot` e aplica-se nesta ordem exata:
-1. **Heróis vivos (`hero.alive && hero.hp > 0`)**:
+Upon winning stage `N` (`N < 5`), capture each hero's final `hp` and `alive` from `GameStateSnapshot` and apply in this exact order:
+1. **Living heroes (`hero.alive && hero.hp > 0`)**:
    ```ts
    const heal = Math.ceil(hero.maxHp * CAMPAIGN_ALIVE_HEAL_RATIO);
    hero.hp = Math.min(hero.maxHp, hero.hp + heal);
    ```
-2. **Heróis caídos (`!hero.alive || hero.hp === 0`)**:
+2. **Fallen heroes (`!hero.alive || hero.hp === 0`)**:
    ```ts
    hero.alive = true;
    hero.hp = Math.max(1, Math.ceil(hero.maxHp * CAMPAIGN_REVIVE_HP_RATIO));
    ```
-3. **Concessão de pontos**: cada um dos 4 heróis recebe `unspentPoints += CAMPAIGN_POINTS_PER_VICTORY` (`+1`), inclusive quem foi revivido.
+3. **Point grant**: each of the 4 heroes receives `unspentPoints += CAMPAIGN_POINTS_PER_VICTORY` (`+1`), including revived heroes.
 
-### 4.2 Evolução no Acampamento
+### 4.2 Evolution at Camp
 
-- Enquanto `status === 'between_stages'`, o jogador distribui os pontos pendentes de cada herói nos 4 atributos (`str`, `dex`, `int`, `fort`), respeitando `MAX_ATTRIBUTE = 12`.
-- Ao investir em `fort`, aplica-se imediatamente a regra da seção 4 de `docs/attribute-system.md`: recalcula `newMaxHp = calcMaxHp(baseHp, newFort)` e soma `delta = Math.max(0, newMaxHp - oldMaxHp)` ao `hp` atual (sem curar dano anterior).
-- Todos os `unspentPoints` devem ser gastos (`totalUnspent === 0`, exceto no caso teórico de todos os atributos já estarem em `MAX_ATTRIBUTE`) antes de habilitar o botão **"Iniciar Fase N+1"**.
-- Ao clicar em **"Iniciar Fase N+1"**, `currentStage` avança para `N + 1`, `status` muda para `'in_stage'`, grava-se o **novo checkpoint** da fase `N + 1` e salva-se no `localStorage`.
+- While `status === 'between_stages'`, the player distributes each hero's pending points across the 4 attributes (`str`, `dex`, `int`, `fort`), respecting `MAX_ATTRIBUTE = 12`.
+- When investing in `fort`, apply the rule from Section 4 of `docs/attribute-system.md` immediately: recompute `newMaxHp = calcMaxHp(baseHp, newFort)` and add `delta = Math.max(0, newMaxHp - oldMaxHp)` to current `hp` (never healing prior damage).
+- All `unspentPoints` must be spent (`totalUnspent === 0`, except in the theoretical case where all attributes are already at `MAX_ATTRIBUTE`) before enabling the **"Start Stage N+1"** button.
+- Clicking **"Start Stage N+1"** advances `currentStage` to `N + 1`, sets `status` to `'in_stage'`, records the **new checkpoint** for stage `N + 1`, and saves to `localStorage`.
 
-### 4.3 Checkpoint, Reinício e Persistência (`localStorage`)
+### 4.3 Checkpoint, Restart, and Persistence (`localStorage`)
 
-- **Chave**: `CAMPAIGN_SAVE_KEY = 'rune_tactics_v4_save'`
-- **Versão**: `CAMPAIGN_SAVE_VERSION = 4`
-- **Momentos de gravação automática**:
-  1. Ao iniciar uma Nova Campanha (checkpoint da Fase 1, `status: 'in_stage'`).
-  2. Ao vencer uma fase 1..4 (estado já recuperado + pontos concedidos, `status: 'between_stages'`).
-  3. A cada ponto alocado no Acampamento (mantém `status: 'between_stages'`).
-  4. Ao confirmar avanço para a Fase `N+1` (novo `checkpoint` da Fase `N+1`, `status: 'in_stage'`).
-  5. Ao vencer a Fase 5 (`status: 'completed'`).
-- **Reiniciar fase**: disponível tanto na tela de Derrota quanto durante a batalha (botão "Reiniciar fase" no painel de partida quando em campanha). Restaura `heroes` a partir de `campaign.checkpoint.heroes` (atributos e HP de entrada na fase) e reinicia o `GameEngine` na mesma fase, descartando dano e mortes ocorridos na tentativa falha.
-- **Nova campanha**: limpa `rune_tactics_v4_save` e começa a Fase 1 com os 4 heróis base e HP cheio.
-- **Recarregamento da página**:
-  - Se houver save válido com `status === 'in_stage'`, o botão **"Continuar Campanha"** retoma exatamente no **checkpoint do início da fase atual** (`currentStage`).
-  - Se `status === 'between_stages'`, retoma diretamente na **tela de Acampamento/Evolução** antes da fase `currentStage + 1`, preservando `hp` recuperado e `unspentPoints`.
-  - Se `status === 'completed'`, permite iniciar Nova Campanha ou visualizar conclusão.
-- **Validação estrita ao carregar (`SaveSystem.ts`)**: rejeita JSON malformado, `version !== 4`, `currentStage` fora de `1..5`, ausência de qualquer um dos 4 heróis canônicos, atributos fora de `[MIN_ATTRIBUTE, MAX_ATTRIBUTE]`, ou `hp <= 0` / `hp > calcMaxHp(baseHp, fort)`, retornando `null` sem quebrar o jogo.
+- **Key**: `CAMPAIGN_SAVE_KEY = 'rune_tactics_v4_save'`
+- **Version**: `CAMPAIGN_SAVE_VERSION = 4`
+- **Automatic save points**:
+  1. When starting a New Campaign (Stage 1 checkpoint, `status: 'in_stage'`).
+  2. When winning a stage 1..4 (recovered state + awarded points, `status: 'between_stages'`).
+  3. Whenever an attribute point is allocated in Camp (remains `status: 'between_stages'`).
+  4. When confirming progression to Stage `N+1` (new `checkpoint` for Stage `N+1`, `status: 'in_stage'`).
+  5. When winning Stage 5 (`status: 'completed'`).
+- **Restart Stage**: available both on the Defeat screen and during battle ("Restart Stage" button in the match panel when in Campaign mode). Restores `heroes` from `campaign.checkpoint.heroes` (entry attributes and HP for the current stage) and resets `GameEngine` on the same stage, discarding damage and deaths from the failed attempt.
+- **New Campaign**: clears `rune_tactics_v4_save` and starts Stage 1 with the 4 base heroes at full HP.
+- **Page reload**:
+  - If a valid save exists with `status === 'in_stage'`, **"Continue Campaign"** resumes cleanly from the **start-of-stage checkpoint** of `currentStage`.
+  - If `status === 'between_stages'`, it resumes directly on the **Camp / Evolution screen** before stage `currentStage + 1`, preserving recovered `hp` and `unspentPoints`.
+  - If `status === 'completed'`, it allows starting a New Campaign or viewing completion.
+- **Strict validation on load (`SaveSystem.ts`)**: rejects malformed JSON, `version !== 4`, `currentStage` outside `1..5`, missing any of the 4 canonical heroes, attributes outside `[MIN_ATTRIBUTE, MAX_ATTRIBUTE]`, or `hp <= 0` / `hp > calcMaxHp(baseHp, fort)`, returning `null` without crashing the game.

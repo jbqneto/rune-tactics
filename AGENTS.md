@@ -1,75 +1,146 @@
-# Instruções para agentes
+# Agent Instructions
 
-Rune Tactics é um jogo tático por turnos para navegador, em TypeScript com Three.js. Leia `docs/architecture.md`, `docs/game-design.md` e os documentos da V4 (`docs/attribute-system.md`, `docs/combat-system.md`, `docs/campaign-design.md`, `docs/enemy-design.md`, `docs/balance-config.md`) antes de escrever código.
+Rune Tactics is a browser-based turn-based tactical game built in TypeScript with Three.js. Read `docs/architecture.md`, `docs/game-design.md`, and the V4 specification documents (`docs/attribute-system.md`, `docs/combat-system.md`, `docs/campaign-design.md`, `docs/enemy-design.md`, `docs/balance-config.md`) before writing code. For V5/V6 PvP multiplayer and MCP work, also read `docs/multiplayer-architecture.md`, `docs/colyseus-integration.md`, `docs/game-command-contracts.md`, `docs/pvp-game-design.md`, and `docs/mcp-v6-architecture.md`.
 
-## Escopo
+## Scope
 
-A **V4 — The Ashen Campaign** está implementada sobre a base V2.2/V2.3:
-- **Base tática (V2.2 / V2.3)**: ativações individuais alternadas (`docs/turn-system.md`), cadáveres persistentes no chão, quatro classes de herói (`knight`, `archer`, `mage`, `cleric`), linha de visão, câmera orbital de 360°, seleção de células encobertas por personagens, orientação automática de aliados, `Arcane Burst` em área com projétil único, atalho `E`, opacidade da unidade ativa, `smartAttack` / `smartUseSkill`, `undoMove`, sorteio determinístico por semente e `MAPS` em `gameConfig.ts` (atualmente 8 mapas 12×12).
-- **Sistemas da V4**:
-  - Sistema de atributos (`STR`, `DEX`, `INT`, `FORT`) com teto `MAX_ATTRIBUTE = 12` e dano/cura centralizados (`AttributeSystem` + `CombatSystem`);
-  - Postura defensiva unificada (`defend()`, atalho `G`, mitigação de 50% até a próxima ativação da unidade);
-  - Quatro novos inimigos (`goblin-stalker`, `skeleton-shieldbearer`, `necromancer-acolyte`, chefe `ashen-guardian` em 2 fases) e habilidade inimiga `dark-mend`;
-  - Ataques anunciados em área (`PendingAttack`) com telegráfe visual (`dangerCells`), cancelamento na morte do conjurador e resolução no início da próxima ativação;
-  - Campanha de 5 fases (`CAMPAIGN_STAGES`), novos mapas `forgotten-swamp` (obstáculos `water` com `blocksLos: false` e `bridgeCells`) e `corrupted-sanctuary`, tela de Acampamento & Evolução, checkpoint de fase e persistência versionada (`CampaignSystem` + `SaveSystem`), isolados do modo **Batalha Rápida** (`quick-battle`).
+**V6 — MCP Adapter & AI Agent Matches** extends the V5/V4/V2 tactical foundation with official Model Context Protocol (MCP) agent support:
+- **Tactical base (V2.2 / V2.3)**: alternating individual unit activations (`docs/turn-system.md`), persistent corpses on the board, four hero classes (`knight`, `archer`, `mage`, `cleric`), line of sight, 360° orbital camera, selection of cells occluded by characters, automatic ally facing, area-of-effect `Arcane Burst` with a single projectile, `E` shortcut, active unit opacity, `smartAttack` / `smartUseSkill`, `undoMove`, seeded deterministic RNG, and `MAPS` in `gameConfig.ts` (currently 8 maps of size 12×12).
+- **V4 systems**:
+  - Attribute system (`STR`, `DEX`, `INT`, `FORT`) with `MAX_ATTRIBUTE = 12` cap and centralized damage/healing (`AttributeSystem` + `CombatSystem`);
+  - Unified defensive stance (`defend()`, `G` shortcut, 50% damage mitigation until the unit's next activation);
+  - Four new enemies (`goblin-stalker`, `skeleton-shieldbearer`, `necromancer-acolyte`, two-phase boss `ashen-guardian`) and enemy skill `dark-mend`;
+  - Telegraphed area attacks (`PendingAttack`) with visual danger indicators (`dangerCells`), cancellation on caster death, and resolution at the start of the caster's next activation;
+  - 5-stage campaign (`CAMPAIGN_STAGES`), new maps `forgotten-swamp` (`water` obstacles with `blocksLos: false` and `bridgeCells`) and `corrupted-sanctuary`, Camp & Evolution screen, stage checkpoints, and versioned persistence (`CampaignSystem` + `SaveSystem`), isolated from **Quick Battle** (`quick-battle`).
+- **V5 systems (PvP 3v3)**:
+  - Online 3v3 PvP (`'teamA'` vs `'teamB'`) on `forgotten-swamp` with 180°-mirrored symmetric spawns;
+  - 3-hero draft: 3 unique classes among Knight, Archer, Mage, Cleric with custom slot ordering `[1, 2, 3]` and interleaved activation order (`[A1, B1, A2, B2, A3, B3]`);
+  - Authoritative headless `MatchService` (`src/game/pvp/MatchService.ts`) with optimistic concurrency (`expectedRevision`), `commandId` idempotency, 60s turn timer, and disconnect pause/forfeit;
+  - Dedicated Colyseus server (`server/`) with `colyseus@0.18.12`, `@colyseus/schema@5.0.49`, `PvPRoom`, HMAC session tokens, public Room IDs (`RT-XXXXXXXX`), and 90s reconnect grace;
+  - Browser PvP adapter (`src/network/`): `ColyseusMatchClient` + `PvPClientEngine` projecting spectator perspective (`myTeam` -> `'player'`, `opponentTeam` -> `'enemy'`), answering `IGameEngine` queries from `LegalActionsSnapshot` without client recalculation;
+  - 180° camera flip (Seat A at 45°, Seat B at 225°), team-relative death visuals, and PvP lobby/HUD overlays.
+- **V6 systems (MCP Adapter & AI Agent Matches)**:
+  - Official MCP Server (`server/src/mcp/`) over stdio via `@modelcontextprotocol/sdk` (`1.32.2`) with 6 tools: `create_practice_match`, `join_pvp_room`, `get_match_state`, `get_legal_actions`, `submit_action`, `wait_for_turn`;
+  - Headless Practice / Sparring Mode (`PracticeBackend`) and live Colyseus room client (`ColyseusRoomBackend`);
+  - Pure deterministic `HeuristicBot` and `AgentMatchRunner` driver with zero tactical rule duplication;
+  - Full `actorType: 'mcp-agent'` propagation with visual `[MCP]` badges in Lobby/Draft and in-match HUD headers, plus MCP code sharing tips in room waiting modals.
 
-Trabalho novo é correção, ajuste ou balanceamento dentro desse escopo, a menos que quem coordena peça outra coisa.
+New work consists of fixes, adjustments, or balancing within this scope, unless the coordinator explicitly requests otherwise.
 
-## Limites entre camadas
+## Layer Boundaries
 
-- `src/shared/`, `src/config/` e `src/game/` não importam Three.js nem acessam `window`, `document`, `localStorage` ou qualquer API de DOM.
-- `src/rendering/`, `src/input/` e `src/ui/` não importam nada de `src/game/`. Eles usam o motor apenas pela interface `IGameEngine` e recebem callbacks/estado de campanha injetados por `src/main.ts`.
-- Regras de jogo (dano, atributos, alcance, linha de visão, caminho, recarga, turno, IA, campanha, validação de save) ficam somente em `src/game/`. A interface pergunta ao motor/sistema de campanha; ela não recalcula.
-- Números da partida (tamanho da grade, obstáculos, stats base das classes, atributos iniciais, habilidades, inimigos, fases da campanha, constantes de evolução/save) ficam somente em `src/config/gameConfig.ts`. Não os repita em outro arquivo.
+- `src/shared/`, `src/config/`, and `src/game/` must NEVER import Three.js, `@colyseus/sdk`, `colyseus`, `@colyseus/schema`, or access `window`, `document`, `localStorage`, or any DOM API.
+- `src/rendering/`, `src/input/`, and `src/ui/` must NEVER import anything from `src/game/` or `@colyseus/sdk`. They communicate with the engine strictly through the `IGameEngine` interface and receive campaign/PvP callbacks/state injected by `src/main.ts`.
+- `src/network/` must NEVER import `src/game/`, `src/rendering/`, `src/ui/`, or Three.js. It implements `IGameEngine` via `PvPClientEngine` by projecting server state and answering queries purely from `LegalActionsSnapshot`.
+- `server/` is an isolated Node application with its own `package.json` and `tsconfig.json`. It imports `MatchService` from `src/game/pvp/MatchService.ts`, `gameConfig.ts`, and `src/shared/pvpTypes.ts`. It must NEVER import `src/rendering/`, `src/ui/`, `src/input/`, or Three.js.
+- `server/src/mcp/` is an MCP adapter layer on top of `MatchService` and `PvPRoom`. It imports `@modelcontextprotocol/sdk`, `zod`, `@colyseus/sdk`, `src/shared/pvpTypes.ts`, `src/config/gameConfig.ts`, and `src/game/pvp/MatchService.ts`. It must NEVER import `src/rendering/`, `src/ui/`, `src/input/`, `src/network/`, `three`, or DOM APIs. `HeuristicBot` never imports `src/game/` (all reachability and damage estimations come strictly from `LegalActionsSnapshot`).
+- Game rules (damage, attributes, range, line of sight, pathfinding, cooldowns, turn order, AI, campaign state, save validation, PvP match validation) live exclusively in `src/game/`. The UI queries the engine/campaign/PvP client; it never recalculates rules.
+- Match numbers (grid size, obstacles, class base stats, starting attributes, skills, enemies, campaign stages, evolution/save constants, PvP timings and team size) live exclusively in `src/config/gameConfig.ts`. Do not duplicate them elsewhere.
 
-## Contratos
+## Contracts
 
-`src/shared/types.ts` é o contrato entre o motor e a interface. Quem implementa um dos lados não o altera por conta própria: se o contrato não atende, pare e avise quem coordena, porque a mudança afeta o outro lado.
+`src/shared/types.ts` is the contract between the engine and the interface. Implementers on either side must not alter it unilaterally: if the contract does not cover a requirement, stop and notify the coordinator, because changes affect the other side.
 
-## Câmera, seleção e orientação
+## Camera, Selection, and Orientation
 
-- Só `SceneManager` move a câmera. `InputManager` detecta o gesto e emite um callback; `main.ts` faz a ligação.
-- O azimute da câmera é estado de vista. Ele não vai para o motor nem para o snapshot, e `reset()` não o altera.
-- A rotação da câmera vale em qualquer estado de turno e durante animações. Hover e clique no tabuleiro continuam bloqueados fora da vez do jogador.
-- Clique direito parado cancela o modo de ataque ou habilidade; arraste com o botão direito gira a câmera. Um gesto novo não pode quebrar um dos dois.
-- Hover e clique usam o mesmo resolvedor de seleção, para o destaque mostrar o que o clique vai escolher.
-- Todo obstáculo interno bloqueia a seleção do que está atrás dele, inclusive caixote e barril. Personagens não bloqueiam a seleção do chão atrás deles.
-- Objetos que entram no raycast levam uma marca explícita em `userData`. Não dependa da ausência de um campo para classificar um acerto.
-- Nada no cenário pode pressupor a vista inicial: uma peça alta fora do tabuleiro precisa ser escondida quando fica entre a câmera e as células.
-- A orientação das unidades é só apresentação e fica no renderer (`facingY`). `syncUnits` não zera a rotação. Se uma regra passar a depender de orientação, ela vai para o motor e para o contrato.
-- Lógica de interface que não precisa de Three.js nem do DOM (órbita, resolvedor de seleção, orientação) fica em módulo próprio, sem essas importações, com teste em `tests/`.
+- Only `SceneManager` moves the camera. `InputManager` detects the gesture and emits a callback; `main.ts` wires them together.
+- Camera azimuth is view state. It does not go into the engine or snapshot, and `reset()` must not change it.
+- Camera rotation works in any turn state and during animations. Board hover and click remain locked outside the player's turn.
+- A stationary right-click cancels attack or skill mode; right-click drag rotates the camera. Any new gesture must not break either behavior.
+- Hover and click use the same selection resolver so the highlight always reflects what clicking will select.
+- Every internal obstacle blocks selection of what lies behind it, including crates and barrels. Characters do not block selection of ground cells behind them.
+- Raycastable objects must carry an explicit marker in `userData`. Do not rely on the absence of a field to classify a hit.
+- Nothing in the scene may assume the initial camera angle: tall scenery props outside the board must be hidden when they sit between the camera and board cells.
+- Unit orientation is presentation-only and lives in the renderer (`facingY`). `syncUnits` must not reset rotation. If any rule ever depends on orientation, it must move into the engine and contract.
+- Interface logic that does not require Three.js or the DOM (orbit math, selection resolver, orientation) lives in its own module without those imports, with tests in `tests/`.
 
-## Regras da V2.3 (Batalha Rápida e Motor)
+## V2.3 Rules (Quick Battle and Engine)
 
-- **Sorteio só com semente.** O motor não usa `Math.random` nas regras. Mapa e posições iniciais saem do gerador com semente de `src/game/maps/MapSystem.ts`, e a mesma semente repete a batalha.
-- **Teste que usa a batalha padrão fixa a semente.** Teste de regra monta o cenário com posições explícitas (`randomizeSpawns` desabilitado automaticamente quando `units` é informado), que não passam pelo sorteio.
-- **Mapas ficam em `MAPS`, em `gameConfig.ts`.** Todo mapa é 12×12, não tem obstáculo nas linhas de nascimento e tem todas as células livres ligadas (verificado por BFS). Um mapa novo entra com o teste dessas restrições. Obstáculos `'water'` têm `blocksLos: false`.
-- **Ação inteligente é atômica e fica no motor.** `smartAttack` e `smartUseSkill` andam e agem, ou não fazem nada. A interface não escolhe a célula nem calcula caminho: ela mostra a prévia a partir de `getSmartAttackPlan` e `getSmartSkillPlan`.
-- **Toda ação que anda e age em um clique tem prévia no hover**, igual ao que o clique vai executar.
-- **Desfazer é decisão do motor.** A interface habilita o botão por `canUndoMove` e não guarda posição anterior por conta própria.
-- **Os eventos de uma habilidade ou ataque anunciado são contíguos e chegam no mesmo lote**: `skillUsed` (ou `pendingAttackResolved`), depois o `unitAttacked` ou `unitHealed` de cada atingido, e depois `unitDied`/`bossPhaseChanged`. O renderer agrupa esses eventos em uma animação; não transforme cada evento em uma animação separada.
-- **Atalho de teclado chama o mesmo caminho do botão.** Não duplique as travas de vez do jogador e de animação.
-- **`reset()` pode trocar o mapa.** Quem trata `gameReset` ou troca de fase reconstrói o tabuleiro a partir do snapshot e libera geometrias e materiais antigos.
-- **A unidade ativa vem de `activeUnitId`**, não de `selectedUnitId`, que é nulo na vez dos inimigos.
+- **Seeded randomness only.** The engine never uses `Math.random` in rules. Map and initial spawn positions come from the seeded generator in `src/game/maps/MapSystem.ts`, and the same seed reproduces the exact battle.
+- **Tests using the default battle fix the seed.** Rule tests set up scenarios with explicit positions (`randomizeSpawns` is automatically disabled when `units` is provided), bypassing random spawns.
+- **Maps live in `MAPS` in `gameConfig.ts`.** Every map is 12×12, has no obstacles on spawn rows, and has all free cells connected (verified by BFS). Any new map must include tests for these constraints. `'water'` obstacles have `blocksLos: false`.
+- **Smart actions are atomic and live in the engine.** `smartAttack` and `smartUseSkill` both move and act, or do nothing. The UI does not choose the destination cell or compute paths: it renders previews from `getSmartAttackPlan` and `getSmartSkillPlan`.
+- **Every one-click move-and-act action has a hover preview** matching what the click will execute.
+- **Undo is an engine decision.** The UI enables the button via `canUndoMove` and never tracks previous positions on its own.
+- **Events from a skill or telegraphed attack are contiguous and arrive in the same batch**: `skillUsed` (or `pendingAttackResolved`), followed by `unitAttacked` or `unitHealed` for each affected target, and then `unitDied`/`bossPhaseChanged`. The renderer groups these events into a single animation; do not split each event into a separate animation.
+- **Keyboard shortcuts follow the exact same path as buttons.** Do not duplicate player-turn or animation locks.
+- **`reset()` may change the map.** Handlers for `gameReset` or stage transitions rebuild the board from the snapshot and dispose old geometries and materials.
+- **The active unit comes from `activeUnitId`**, not `selectedUnitId` (which is `null` during enemy turns).
 
-## Regras da V4
+## V4 Rules
 
-- **`AttributeSystem` (`src/game/attributes/AttributeSystem.ts`)**: única fonte das fórmulas puras (`offensiveBonus`, `calcMaxHp`, `fortitudeResistance`, `getAttributeForAttack`, `computeUnitDamage`, `computeUnitArmor`, `applyAttributePoint`). O escalonamento de dano e cura vem sempre do `attackKind` explícito (`'melee' -> str`, `'ranged' -> dex`, `'magic' -> int`, cura -> `int`) — nunca infira por `attackRange`. Ao evoluir `fort`, some ao `hp` atual apenas o incremento positivo de `maxHp` (nunca cure dano prévio). Respeite `[MIN_ATTRIBUTE, MAX_ATTRIBUTE]` (`1..12`).
-- **Dano centralizado e `defend()` unificado (`src/game/combat/CombatSystem.ts`)**: todo dano (ataque básico, habilidade e `PendingAttack`) passa por `computeDamage` (`max(1, attackPower - totalDefense)`, reduzido por `Math.ceil(damageBeforeGuard * 0.5)` quando `isGuarding`), garantindo piso mínimo `1`. `defend()` apenas ativa `isGuarding = true` (sem escudo numérico), consome `hasAttacked`, funciona antes ou depois de mover e expira no início da próxima ativação da própria unidade.
-- **`PendingAttack` e Chefe (`ashen-guardian`)**: `prepareAttack` cria um `PendingAttack` com `targetCells` fixas e emite `attackPrepared`. Se o conjurador morrer antes de sua próxima ativação, o motor remove seus ataques pendentes e emite `attackCancelled` (`reason: 'caster_died'`) imediatamente após `unitDied`. Se vivo no início da sua próxima ativação, `GameEngine` resolve seus `PendingAttack` (contra alvos vivos adversários) antes de `checkBattleEnd` e antes das novas ações do turno. `ashen-guardian` transiciona irreversivelmente para Fase 2 ao atingir `hp <= Math.floor(maxHp * 0.5)` sem restaurar HP, ganha `+1 moveRange` e emite `bossPhaseChanged`.
-- **`CampaignSystem` (`src/game/campaign/CampaignSystem.ts`)**: gerencia as 5 fases de `CAMPAIGN_STAGES` mantendo o modo `quick-battle` isolado. Pós-vitória (Fases 1–4) aplica recuperação (`+35%` ceil vivos, revive `25%` ceil caídos) e concede `+1` ponto por herói antes do Acampamento; `advanceToNextStage()` exige `unspentPoints === 0` (exceto herói com todos os atributos em `MAX_ATTRIBUTE`) e grava novo `checkpoint`. `restartCurrentStage()` restaura exatamente `checkpoint.heroes`.
-- **`SaveSystem` (`src/game/campaign/SaveSystem.ts`)**: usa sempre um `StorageAdapter` injetado (em navegador, `src/main.ts` injeta `window.localStorage`; nos testes Node, usa-se adapter em memória). Persiste sob `CAMPAIGN_SAVE_KEY` (`'rune_tactics_v4_save'`) com `version: 4` e validação estrita (`validateCampaignState`), devolvendo `null` em saves inválidos/corrompidos sem quebrar a inicialização. `quick-battle` nunca lê, altera ou apaga o save de campanha.
+- **`AttributeSystem` (`src/game/attributes/AttributeSystem.ts`)**: single source of truth for pure formulas (`offensiveBonus`, `calcMaxHp`, `fortitudeResistance`, `getAttributeForAttack`, `computeUnitDamage`, `computeUnitArmor`, `applyAttributePoint`). Damage and healing scaling always come from the explicit `attackKind` (`'melee' -> str`, `'ranged' -> dex`, `'magic' -> int`, healing -> `int`) — never infer it from `attackRange`. When upgrading `fort`, add only the positive `maxHp` increment to current `hp` (never heal prior damage). Enforce `[MIN_ATTRIBUTE, MAX_ATTRIBUTE]` (`1..12`).
+- **Centralized damage and unified `defend()` (`src/game/combat/CombatSystem.ts`)**: all damage (basic attacks, skills, and `PendingAttack`) goes through `computeDamage` (`max(1, attackPower - totalDefense)`, reduced via `Math.ceil(damageBeforeGuard * 0.5)` when `isGuarding`), preserving a minimum floor of `1`. `defend()` only sets `isGuarding = true` (no numeric shield), consumes `hasAttacked`, works before or after moving, and expires at the start of the unit's own next activation.
+- **`PendingAttack` and Boss (`ashen-guardian`)**: `prepareAttack` creates a `PendingAttack` with fixed `targetCells` and emits `attackPrepared`. If the caster dies before its next activation, the engine removes its pending attacks and emits `attackCancelled` (`reason: 'caster_died'`) immediately after `unitDied`. If alive at the start of its next activation, `GameEngine` resolves its `PendingAttack` entries (against living opposing targets) before `checkBattleEnd` and before new turn actions. `ashen-guardian` transitions irreversibly to Phase 2 upon reaching `hp <= Math.floor(maxHp * 0.5)` without restoring HP, gains `+1 moveRange`, and emits `bossPhaseChanged`.
+- **`CampaignSystem` (`src/game/campaign/CampaignSystem.ts`)**: manages the 5 stages of `CAMPAIGN_STAGES` while keeping `quick-battle` isolated. Post-victory (Stages 1–4) applies recovery (`+35%` ceil for living heroes, revives fallen heroes at `25%` ceil) and awards `+1` point per hero before Camp; `advanceToNextStage()` requires `unspentPoints === 0` (except for heroes with all attributes at `MAX_ATTRIBUTE`) and records a new `checkpoint`. `restartCurrentStage()` restores `checkpoint.heroes` verbatim.
+- **`SaveSystem` (`src/game/campaign/SaveSystem.ts`)**: always uses an injected `StorageAdapter` (in the browser, `src/main.ts` injects `window.localStorage`; Node tests inject an in-memory adapter). Persists under `CAMPAIGN_SAVE_KEY` (`'rune_tactics_v4_save'`) with `version: 4` and strict validation (`validateCampaignState`), returning `null` for invalid/corrupted saves without crashing startup. `quick-battle` never reads, modifies, or deletes the campaign save.
+
+## V5 Rules (PvP 3v3 and Server Architecture)
+
+- **Pure Tactical Core (`PvPMatchEngine` in `src/game/pvp/PvPMatchEngine.ts`)**:
+  - Implements canonical `'teamA'` vs `'teamB'` 3v3 matches on `forgotten-swamp`.
+  - Enforces 3 unique hero classes per team; generates interleaved turn order `[A1, B1, A2, B2, A3, B3]` (or `[B1, A1, ...]` on rematch).
+  - Positions Team A on rows `[0, 1]` via seeded RNG (`createRng(seed)`) and Team B at exact 180° mirrors `(11 - x, 11 - y)` on rows `[10, 11]`.
+  - Exposes `getLegalActions(team)` returning complete `LegalActionsSnapshot` (reachable paths, range cells, smart plans, damage estimates, `wouldKill`).
+  - No enemy AI is executed in PvP mode.
+- **Authoritative `MatchService` (`src/game/pvp/MatchService.ts`)**:
+  - Pure, headless, timer-free lifecycle coordinator.
+  - Pipeline: `ActorContext` seat validation -> `(actorId, commandId)` idempotency -> phase check -> turn ownership -> `expectedRevision` -> `PvPMatchEngine` command execution -> bump revision and update `turnDeadlineMs`.
+  - Disconnect pause retains remaining turn time (`pausedRemainingTurnMs`); 90s grace expiration or voluntary forfeit triggers `forfeitMatch`.
+- **Colyseus Server (`server/`)**:
+  - Runs `PvPRoom` using `@colyseus/schema@5.0.49` functional builders (`schema()`, `t.*`) and `colyseus@0.18.12`.
+  - Generates HMAC-signed session tokens (`POST /api/pvp/session`) and public Room IDs (`RT-XXXXXXXX`).
+  - Single-queue serialization (`this.enqueue`) prevents race conditions between player commands and timeout callbacks.
+  - Handles reconnection via `allowReconnection(client, 90)`; unicasts fresh `matchInit` on recovery.
+- **Client Perspective Projection (`PvPClientEngine` in `src/network/PvPClientEngine.ts`)**:
+  - Implements `IGameEngine` for `src/main.ts` and `HudManager`.
+  - Projects `myTeam` -> `'player'`, `opponentTeam` -> `'enemy'`, local turn -> `'player' / 'player_unit_active'`, opponent turn -> `'enemy' / 'enemy_activation'`, winner -> `'victory' / 'defeat'`.
+  - Answers all queries (`getReachableCells`, `getPath`, `getSmartAttackPlan`, etc.) strictly from `LegalActionsSnapshot` with zero local rule execution.
+  - Locks duplicate submissions with `inFlightCommandId` until `CommandResult` returns.
+- **180° Camera and Visuals**:
+  - Seat A camera azimuth starts at $\pi / 4$ (45°); Seat B starts at $5\pi / 4$ (225°).
+  - Only `SceneManager` updates camera azimuth; azimuth is preserved across rematch and reset.
+  - Non-active living units of both teams dim to opacity 0.75 during active PvP battle.
+- **Server Test Command**:
+  - Server tests run via `npm run test:server` (or `cd server && npm test`), executing Vitest with `--pool=threads --poolOptions.threads.singleThread` to isolate Colyseus WebSocket servers.
+  - Root client tests run via `npm test` (targeting `tests/**/*.test.ts`).
+  - Full suite check: `npm run typecheck:all && npm run test:all && npm run build:all`.
+- **References**:
+  - `docs/multiplayer-architecture.md` (overall architecture and V6 MCP readiness)
+  - `docs/colyseus-integration.md` (Colyseus 0.18 lifecycle, room schema, reconnection)
+  - `docs/game-command-contracts.md` (command envelopes, results, events, snapshots)
+  - `docs/pvp-game-design.md` (game design rules, draft, timing, and UI flows)
+
+## V6 Rules (MCP Adapter and Agent Matches)
+
+- **Official MCP Server (`server/src/mcp/`)**:
+  - Exposes 6 canonical tools (`create_practice_match`, `join_pvp_room`, `get_match_state`, `get_legal_actions`, `submit_action`, `wait_for_turn`) via `@modelcontextprotocol/sdk` (`1.32.2`) with Zod schema validation.
+  - CLI entrypoint in `server/src/mcp/cli.ts` uses `StdioServerTransport` and logs strictly to `process.stderr` so `stdout` remains pure JSON-RPC 2.0 frames.
+- **Dual Backends**:
+  - **Headless Practice (`PracticeBackend`)**: In-memory `MatchService` binding the caller to Seat A with optional `HeuristicBot` on Seat B.
+  - **Live Colyseus (`ColyseusRoomBackend`)**: Connects to `PvPRoom` via `@colyseus/sdk` with `actorType: 'mcp-agent'`, supporting both room creation (generating `RT-XXXXXXXX`) and joining existing Room IDs.
+- **Pure `HeuristicBot` & Deterministic Runner**:
+  - `HeuristicBot` (`server/src/mcp/HeuristicBot.ts`) consumes `(ObservableMatchState, LegalActionsSnapshot)` without importing any rules from `src/game/`.
+  - `AgentMatchRunner` (`server/src/mcp/AgentMatchRunner.ts`) runs reproducible headless bot matches with step-by-step replay logs.
+- **Actor Type Badging**:
+  - When `actorType === 'mcp-agent'`, the UI displays a subtle `[MCP]` badge next to player and opponent names (Lobby/Draft and Opponent HUD header).
+  - The room waiting modal displays a tip noting that the `RT-XXXXXXXX` Room ID can be joined by AI agents via `join_pvp_room`.
+- **MCP Test and Run Commands**:
+  - Run MCP server via stdio: `npm run mcp` (root or `server/`).
+  - Build MCP server: `npm --prefix server run build:mcp`.
+  - Server & MCP test suite: `npm run test:server` (Vitest single-thread).
+  - Reference: `docs/mcp-v6-architecture.md`.
 
 ## Assets
 
-- Os arquivos ficam em `public/assets/`, nas pastas `portraits/`, `icons/`, `models/` e `textures/`, e são referenciados pela raiz do site (`/assets/...`).
-- O retrato de cada classe/inimigo e o ícone de cada habilidade são declarados em `gameConfig.ts` (`portraitPath` e `icon`). A interface lê esses campos em vez de montar o caminho.
-- Um asset novo segue `docs/art-direction.md` e é registrado em `docs/asset-generation.md`.
+- Asset files live in `public/assets/`, under `portraits/`, `icons/`, `models/`, and `textures/`, and are referenced from the site root (`/assets/...`).
+- Each class/enemy portrait and skill icon path is declared in `gameConfig.ts` (`portraitPath` and `icon`). The UI reads those fields instead of constructing paths dynamically.
+- Any new asset follows `docs/art-direction.md` and is logged in `docs/asset-generation.md`.
 
-## Convenções
+## Conventions
 
-- Coordenadas: `x` é a coluna e `y` é a linha, ambas de 0 a `gridSize - 1` (0 a 11).
-- O motor é síncrono e sem temporizadores. Animações e esperas ficam na renderização.
-- Uma ação inválida devolve `{ ok: false, reason }`, não altera o estado e não emite eventos.
-- Mudança em regra do motor vem com teste em `tests/`. Rode `npm run typecheck`, `npm test` e `npm run build` antes de entregar.
-- Cada agente cria e edita apenas os arquivos da tarefa que recebeu.
+- Coordinates: `x` is the column and `y` is the row, both from `0` to `gridSize - 1` (`0` to `11`).
+- The engine is synchronous and timer-free. Animations and delays belong in rendering.
+- An invalid action returns `{ ok: false, reason }`, leaves state unchanged, and emits no events.
+- Any engine rule change requires tests in `tests/`. Run `npm run typecheck`, `npm test`, and `npm run build` before delivering.
+- Each agent only creates and edits files belonging to its assigned task.

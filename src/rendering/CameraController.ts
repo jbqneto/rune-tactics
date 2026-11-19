@@ -18,6 +18,9 @@ export class CameraController {
   private readonly camera: THREE.Camera;
   private readonly canvas: HTMLElement | null;
   private draggingRight = false;
+  /** Pointer driving the current orbit drag (right mouse button or the first finger). */
+  private dragPointerId: number | null = null;
+  private dragIsTouch = false;
   private dragDistance = 0;
   private lastX = 0;
   private lastY = 0;
@@ -37,17 +40,27 @@ export class CameraController {
     this.applyCameraTransform();
 
     this.handlePointerDownBound = (e) => {
-      if (e.button === 2) {
+      const isTouch = e.pointerType === 'touch';
+      if (e.button === 2 || (isTouch && !this.draggingRight)) {
         this.beginRightDrag(e.clientX, e.clientY);
+        this.dragPointerId = e.pointerId ?? null;
+        this.dragIsTouch = isTouch;
       }
     };
     this.handlePointerMoveBound = (e) => {
-      if (this.draggingRight) {
+      if (this.draggingRight && this.isDragPointer(e)) {
         this.moveRightDrag(e.clientX, e.clientY);
       }
     };
     this.handlePointerUpBound = (e) => {
-      if (e.button === 2 && this.draggingRight) {
+      if (!this.draggingRight || !this.isDragPointer(e)) return;
+      if (this.dragIsTouch) {
+        // Touch has no context menu to suppress; keep long-press "cancel" working.
+        this.draggingRight = false;
+        this.dragDistance = 0;
+        this.dragPointerId = null;
+        this.dragIsTouch = false;
+      } else if (e.button === 2) {
         this.endRightDrag();
       }
     };
@@ -80,6 +93,18 @@ export class CameraController {
         window.addEventListener('keydown', this.handleKeyDownBound);
       }
     }
+  }
+
+  setAzimuth(azimuthRad: number, immediate = true): void {
+    this.targetAzimuth = azimuthRad;
+    if (immediate) {
+      this.currentAzimuth = azimuthRad;
+      this.applyCameraTransform();
+    }
+  }
+
+  private isDragPointer(e: PointerEvent): boolean {
+    return this.dragPointerId === null || e.pointerId === undefined || e.pointerId === this.dragPointerId;
   }
 
   get isDragging(): boolean {

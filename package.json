@@ -5,11 +5,22 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:server": "npm --prefix server run dev",
+    "start:server": "npm --prefix server run start",
     "build": "tsc --noEmit && vite build",
+    "build:server": "npm --prefix server run build",
+    "build:all": "npm run build && npm run build:server",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "typecheck:server": "npm --prefix server run typecheck",
+    "typecheck:all": "npm run typecheck && npm run typecheck:server",
+    "test": "vitest run",
+    "test:server": "npm --prefix server run test",
+    "test:all": "npm run test && npm run test:server",
+    "mcp": "npm --prefix server run mcp",
+    "build:mcp": "npm --prefix server run build:mcp"
   },
   "dependencies": {
+    "@colyseus/sdk": "0.18.10",
     "three": "^0.170.0"
   },
   "devDependencies": {

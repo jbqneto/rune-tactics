@@ -997,7 +997,7 @@ function buildOuterSwampDepth(
 }
 
 /**
- * Builds the 3D "Pântano Esquecido" (`forgotten-swamp`) scenario inspired by
+ * Builds the 3D "Forgotten Swamp" (`forgotten-swamp`) scenario inspired by
  * `references/scenarios/scenario_03.png`, preserving the 12×12 playable grid,
  * adaptive bridges, aquatic plants, Gothic ruins, ancient gnarled tree,
  * 360° occlusion groups, and warm brazier atmosphere.

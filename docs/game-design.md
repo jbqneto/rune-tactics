@@ -1,145 +1,145 @@
-# Game design
+# Game Design
 
-Este documento descreve as regras da V2.2, a versão atual. Os números vêm de `src/config/gameConfig.ts`; se houver diferença, vale o arquivo de config. O sistema de ativações alternadas está detalhado em `docs/turn-system.md`.
+This document describes the V2.2 rules, the current baseline version. Exact numbers come from `src/config/gameConfig.ts`; if there is any discrepancy, the config file takes precedence. The alternating activation system is detailed in `docs/turn-system.md`.
 
-## Visão geral
+## Overview
 
-Quatro heróis enfrentam seis inimigos de cinco tipos distintos em uma arena medieval de 12×12 células. Os times alternam **ativações individuais**: uma unidade age por vez (movimento e ataque/habilidade, em qualquer ordem), uma vez por rodada. Vence quem eliminar o outro lado.
+Four heroes face six enemies across five distinct types in a 12×12 medieval arena. Teams alternate **individual activations**: one unit acts at a time (movement and attack/skill, in either order), once per round. Whoever eliminates the opposing side wins.
 
-## Tabuleiro e obstáculos
+## Board and Obstacles
 
-- Grade de 12×12 células. As colunas vão de A a L (`x` 0..11) e as linhas de 1 a 12 (`y` 0..11).
-- Uma célula comporta no máximo uma unidade **viva**. Cadáveres e células livres permitem passagem.
-- Todo obstáculo bloqueia movimento. Só parede (`wall`) e pilar (`pillar`) bloqueiam a linha de visão.
-- A arena possui uma muralha central na linha 7 (`y = 6`) com duas passagens (portão oeste em C7–D7 e passagem leste em I7), pilares de cobertura total e caixotes/barris como barreiras baixas (veja `OBSTACLES` em `src/config/gameConfig.ts`).
+- 12×12 grid. Columns run A through L (`x` 0..11) and rows 1 through 12 (`y` 0..11).
+- A cell holds at most one **living** unit. Corpses and empty cells allow passage.
+- Every obstacle blocks movement. Only walls (`wall`) and pillars (`pillar`) block line of sight.
+- The arena features a central wall on row 7 (`y = 6`) with two passages (west gate at C7–D7 and east passage at I7), full-cover pillars, and crates/barrels as low barriers (see `OBSTACLES` in `src/config/gameConfig.ts`).
 
-## Heróis
+## Heroes
 
-| Classe | HP | Movimento | Dano | Alcance | Habilidade | Posição inicial |
+| Class | HP | Movement | Damage | Range | Skill | Starting Position |
 |---|---|---|---|---|---|---|
-| Guerreiro (`knight`) | 10 | 3 | 2 | 1 | Runic Strike | E2 (`4,1`) |
-| Arqueira (`archer`) | 8 | 3 | 2 | 3 | Marked Shot | C1 (`2,0`) |
-| Mago (`mage`) | 7 | 2 | 1 | 2 | Arcane Burst | H1 (`7,0`) |
-| Clérigo (`cleric`) | 9 | 2 | 2 | 1 | Healing Light | G2 (`6,1`) |
+| Knight (`knight`) | 10 | 3 | 2 | 1 | Runic Strike | E2 (`4,1`) |
+| Archer (`archer`) | 8 | 3 | 2 | 3 | Marked Shot | C1 (`2,0`) |
+| Mage (`mage`) | 7 | 2 | 1 | 2 | Arcane Burst | H1 (`7,0`) |
+| Cleric (`cleric`) | 9 | 2 | 2 | 1 | Healing Light | G2 (`6,1`) |
 
-## Habilidades
+## Skills
 
-| Habilidade | Alvo | Efeito | Alcance | Área | Recarga |
+| Skill | Target | Effect | Range | Area | Cooldown |
 |---|---|---|---|---|---|
-| Runic Strike | Inimigo | 3 de dano | 1 | um alvo | 2 rodadas |
-| Marked Shot | Inimigo | 3 de dano | 3 | um alvo | 2 rodadas |
-| Arcane Burst | Inimigo | 2 de dano | 3 | célula alvo + 4 ortogonalmente adjacentes | 3 rodadas |
-| Healing Light | Aliado | Cura 3 HP (até `maxHp`) | 3 | um alvo (inclui o lançador) | 2 rodadas |
+| Runic Strike | Enemy | 3 damage | 1 | single target | 2 rounds |
+| Marked Shot | Enemy | 3 damage | 3 | single target | 2 rounds |
+| Arcane Burst | Enemy | 2 damage | 3 | target cell + 4 orthogonally adjacent | 3 rounds |
+| Healing Light | Ally | Heals 3 HP (up to `maxHp`) | 3 | single target (includes caster) | 2 rounds |
 
-- A habilidade ocupa o lugar do ataque básico: cada herói faz um ou outro por ativação.
-- Habilidades de dano ferem só inimigos; `Arcane Burst` não atinge aliados na área.
-- `Healing Light` cura apenas aliados vivos com `HP < maxHp` (inclusive o próprio Clérigo) e não revive mortos.
-- Habilidades com alcance acima de 1 exigem linha de visão até a célula alvo.
-- Ao usar, a habilidade entra em recarga. A recarga cai 1 no início de cada nova rodada (quando todas as unidades vivas já ativaram).
+- Using a skill replaces the basic attack: each hero performs one or the other per activation.
+- Damage skills only hurt enemies; `Arcane Burst` does not hit allies inside the area.
+- `Healing Light` only heals living allies with `HP < maxHp` (including the Cleric itself) and does not revive the dead.
+- Skills with range greater than 1 require line of sight to the target cell.
+- Upon use, the skill goes on cooldown. Cooldowns tick down by 1 at the start of each new round (once all living units have activated).
 
-## Inimigos
+## Enemies
 
-| Tipo | HP | Movimento | Dano | Alcance | Posição inicial |
+| Type | HP | Movement | Damage | Range | Starting Position |
 |---|---|---|---|---|---|
 | Goblin Scout (`goblin-scout`) | 4 | 4 | 1 | 1 | K10 (`10,9`) |
-| Melee Skeleton (`melee-skeleton`) | 5 | 2 | 1 | 1 | D11 (`3,10`) e I11 (`8,10`) |
+| Melee Skeleton (`melee-skeleton`) | 5 | 2 | 1 | 1 | D11 (`3,10`) and I11 (`8,10`) |
 | Armored Skeleton (`armored-skeleton`) | 8 | 2 | 2 | 1 | F11 (`5,10`) |
 | Skeleton Archer (`skeleton-archer`) | 4 | 2 | 1 | 3 | C12 (`2,11`) |
 | Cultist Mage (`cultist-mage`) | 5 | 2 | 2 | 3 | G12 (`6,11`) |
 
-Inimigos não têm habilidade.
+Enemies do not have skills.
 
-## Turnos e ativações alternadas
+## Turns and Alternating Activations
 
-- A partida começa em `awaiting_player_choice`, na rodada 1, com `knight-1` selecionado.
-- Cada unidade viva tem direito a **1 ativação por rodada** (`hasActivatedThisRound`).
-- Em `awaiting_player_choice`, o jogador escolhe qualquer aliado vivo elegível. Ao executar a primeira ação (mover, atacar ou usar habilidade), a unidade é travada (`player_unit_active`, `activationLocked = true`) até gastar movimento e ataque ou até o jogador encerrar a ativação (`endPlayerTurn()`).
-- Ao encerrar uma ativação, a vez passa para a equipe adversária se ela tiver alguma unidade viva elegível; caso contrário, continua com a equipe que ainda tiver unidades elegíveis (sobra).
-- Quando nenhuma unidade viva de ambos os times for elegível, inicia-se uma nova rodada (`round += 1`), todas as ações são restauradas e a recarga das habilidades cai em 1.
+- Matches start in `awaiting_player_choice`, round 1, with `knight-1` selected.
+- Each living unit is entitled to **1 activation per round** (`hasActivatedThisRound`).
+- In `awaiting_player_choice`, the player selects any eligible living ally. Upon executing the first action (move, attack, or skill), the unit is locked (`player_unit_active`, `activationLocked = true`) until both movement and attack are spent or the player ends the activation (`endPlayerTurn()`).
+- When an activation ends, the turn passes to the opposing team if it has any eligible living unit; otherwise it remains with whichever team still has eligible units left.
+- When no living units on either team remain eligible, a new round begins (`round += 1`), all actions are refreshed, and skill cooldowns tick down by 1.
 
-## Movimento, combate e cadáveres
+## Movement, Combat, and Corpses
 
-- O movimento é ortogonal, sem diagonais. A unidade não atravessa obstáculos nem outras unidades vivas.
-- O alcance de ataque é medido em distância de Manhattan; ataques com alcance acima de 1 exigem linha de visão (só `wall` e `pillar` bloqueiam LoS; unidades e cadáveres não).
-- Quando o HP chega a 0, a unidade morre (`alive: false`, `hp: 0`), mas **permanece na lista e no grid como cadáver persistente** na célula onde caiu. Cadáveres não bloqueiam movimento nem LoS, são ignorados pelo agendador de turnos e não podem ser selecionados, atacados ou curados.
+- Movement is orthogonal, with no diagonals. Units cannot pass through obstacles or other living units.
+- Attack range is measured by Manhattan distance; attacks with range greater than 1 require line of sight (only `wall` and `pillar` block LoS; units and corpses do not).
+- When HP reaches 0, the unit dies (`alive: false`, `hp: 0`), but **remains in the unit list and on the grid as a persistent corpse** on the cell where it fell. Corpses do not block movement or LoS, are skipped by the turn scheduler, and cannot be selected, attacked, or healed.
 
-## IA dos inimigos
+## Enemy AI
 
-Todo inimigo vivo segue o fluxo: ataca se tiver alvo válido ao alcance; senão, move-se até `moveRange` passos em direção a uma posição de ataque (ou aproxima-se se não houver caminho de ataque).
+Every living enemy follows the same flow: attack if a valid target is in range; otherwise, move up to `moveRange` steps toward an attack position (or close the distance if no attack path exists).
 
-| Tipo | Ao escolher o alvo | Ao andar |
+| Type | Target Selection | Movement |
 |---|---|---|
-| `melee-skeleton` | Bate no herói de menor HP ao alcance | Vai pelo caminho mais curto até o herói mais próximo |
-| `armored-skeleton` | Bate no herói mais próximo | Entre células igualmente próximas, escolhe a que engaja mais heróis |
-| `goblin-scout` | Bate no herói de menor HP ao alcance | Rápido (`moveRange: 4`), prioriza alcançar o herói vivo mais vulnerável (menor HP) |
-| `skeleton-archer` | Atira no herói de menor HP ao alcance (LoS) | Busca célula com tiro (LoS), preferindo distância ≥ 2 dos heróis |
-| `cultist-mage` | Dispara no herói de menor HP ao alcance (LoS) | Busca célula com tiro (LoS), preferindo distância ≥ 2 dos heróis |
+| `melee-skeleton` | Strikes lowest-HP hero in range | Takes shortest path to nearest hero |
+| `armored-skeleton` | Strikes nearest hero | Among equally close attack cells, chooses the one engaging the most heroes |
+| `goblin-scout` | Strikes lowest-HP hero in range | Fast (`moveRange: 4`), prioritizes reaching the most vulnerable living hero (lowest HP) |
+| `skeleton-archer` | Shoots lowest-HP hero in range (LoS) | Seeks a firing cell (LoS), preferring distance ≥ 2 from heroes |
+| `cultist-mage` | Fires at lowest-HP hero in range (LoS) | Seeks a firing cell (LoS), preferring distance ≥ 2 from heroes |
 
-## Fim da batalha
+## Battle End
 
-- Vitória: todos os inimigos morrem.
-- Derrota: todos os heróis morrem.
-- Vitória ou derrota têm prioridade imediata no golpe final: o turno não avança e nenhuma ativação adicional começa.
+- Victory: all enemies are defeated.
+- Defeat: all heroes are defeated.
+- Victory or defeat takes immediate precedence on the killing blow: the turn does not advance and no further activation starts.
 
-## V2.3 (planejada, ainda não implementada)
+## V2.3 (planned, not yet implemented)
 
-As regras abaixo descrevem a V2.3. Só os contratos em `src/shared/types.ts` existem; o motor e a interface ainda seguem as seções acima. O desenho técnico está em `docs/architecture.md` e as tarefas em `docs/implementation-plan.md`.
+The rules below describe V2.3. Only the contracts in `src/shared/types.ts` exist; the engine and UI still follow the sections above. Technical design is in `docs/architecture.md` and tasks are in `docs/implementation-plan.md`.
 
-Quando a V2.3 for implementada, duas partes das seções acima deixam de valer: as posições iniciais fixas das tabelas de heróis e inimigos, e a muralha central como único traçado da arena.
+When V2.3 is implemented, two parts of the sections above will no longer apply: the fixed starting positions in the hero/enemy tables, and the central wall as the sole arena layout.
 
-### Ataque inteligente
+### Smart Attack
 
-- Clicar em um inimigo ataca de onde o herói está, se o alvo já está ao alcance e, para ataque à distância, com linha de visão. O movimento não é gasto.
-- Se o alvo está fora de alcance e o herói ainda não se moveu, ele anda sozinho até uma célula de onde o ataque vale e ataca em seguida.
-- A célula escolhida é a de menor custo de movimento. No empate, a mais próxima do alvo. Persistindo o empate, a de menor linha e depois a de menor coluna.
-- Se nenhuma célula ao alcance do movimento serve, nada acontece.
-- Antes do clique, o jogo mostra o caminho e a célula de destino.
-- O movimento feito por um ataque inteligente não pode ser desfeito, porque o ataque já aconteceu.
-- Movimento e ataque gastos encerram a ativação, como sempre.
-- A mesma regra vale para as habilidades: o herói anda até a célula mais barata de onde a célula alvo passa a ser válida e lança.
+- Clicking an enemy attacks from the hero's current spot if the target is already in range and, for ranged attacks, within line of sight. Movement is not spent.
+- If the target is out of range and the hero has not moved yet, the hero walks automatically to a cell from which the attack is valid and immediately attacks.
+- The chosen cell is the one with the lowest movement cost. On ties, the closest to the target. If still tied, lowest row then lowest column.
+- If no cell within movement range works, nothing happens.
+- Before clicking, the game previews the path and destination cell.
+- Movement performed by a smart attack cannot be undone, because the attack has already occurred.
+- Spending both movement and attack ends the activation, as usual.
+- The same rule applies to skills: the hero walks to the cheapest cell from which the target cell becomes valid and casts the skill.
 
-### Desfazer movimento
+### Undo Move
 
-- Depois de mover um herói, o jogador pode desfazer o movimento: o herói volta à célula de origem e pode se mover de novo.
-- Só vale uma vez por ativação. O movimento feito depois de desfazer é definitivo.
-- Só vale enquanto o herói não atacou nem usou habilidade depois de se mover.
-- Desfazer não encerra a ativação e não gasta o ataque.
+- After moving a hero, the player can undo the move: the hero returns to its origin cell and can move again.
+- Only usable once per activation. Movement performed after undoing is final.
+- Only valid while the hero has neither attacked nor used a skill after moving.
+- Undoing does not end the activation and does not consume the attack.
 
-### Encerrar o turno pelo teclado
+### End Turn via Keyboard
 
-- A tecla `E` encerra a ativação do herói ativo, como o botão "Encerrar turno (E)".
-- Ela não faz nada na vez dos inimigos, durante animações nem depois do fim da batalha.
+- Pressing `E` ends the active hero's activation, matching the "End Turn (E)" button.
+- It does nothing during enemy turns, during animations, or after battle end.
 
-### Destaque da unidade ativa
+### Active Unit Highlight
 
-- A unidade que está agindo aparece com opacidade total. As outras unidades vivas, dos dois times, aparecem a 75%.
-- Depois do fim da batalha, todas as unidades vivas voltam à opacidade total.
+- The currently acting unit renders at full opacity. All other living units on both teams render at 75% opacity.
+- After battle end, all living units return to full opacity.
 
-### Arcane Burst na tela
+### Arcane Burst Visuals
 
-- O mago dispara um único projétil até a célula alvo.
-- No impacto, uma explosão cobre a célula alvo e as quatro adjacentes.
-- Todos os inimigos atingidos recebem o dano ao mesmo tempo.
-- A regra não muda: 2 de dano, alcance 3, área em cruz, sem ferir aliados.
+- The mage fires a single projectile to the target cell.
+- On impact, an explosion covers the target cell and its four orthogonal neighbors.
+- All hit enemies take damage simultaneously.
+- The rule does not change: 2 damage, range 3, cross area, never harms allies.
 
-### Posições iniciais sorteadas
+### Seeded Random Spawns
 
-- Os heróis nascem em células sorteadas das duas linhas do sul (linhas 1 e 2). Os inimigos, nas duas linhas do norte (linhas 11 e 12).
-- Nenhuma unidade nasce em obstáculo nem na célula de outra.
-- O sorteio usa uma semente. A mesma semente repete o mesmo mapa e as mesmas posições, o que serve para testes e para reproduzir um problema.
-- A ordem de turno não depende da posição.
+- Heroes spawn on randomized cells in the two southern rows (rows 1 and 2). Enemies spawn in the two northern rows (rows 11 and 12).
+- No unit spawns on an obstacle or on another unit's cell.
+- Randomization uses a seed. The same seed reproduces the same map and positions, which helps with testing and bug reproduction.
+- Turn order does not depend on spawn position.
 
-### Mapas
+### Maps
 
-- Há três mapas, todos de 12×12. A cada batalha nova o jogo sorteia um, nunca o mesmo da batalha anterior.
-- Em todos, as duas linhas do sul e as duas do norte não têm obstáculos, e toda célula livre é alcançável.
-- O nome do mapa aparece no HUD.
+- There are three maps, all 12×12. Each new battle picks one, never repeating the previous battle's map consecutively.
+- On all maps, the two southern and two northern rows are free of obstacles, and every free cell is reachable.
+- The map name is shown in the HUD.
 
-Legenda dos traçados: `#` parede e `O` pilar (bloqueiam movimento e visão); `c` caixote e `b` barril (bloqueiam só o movimento). A linha 12 está no topo e a coluna A à esquerda.
+Layout legend: `#` wall and `O` pillar (block movement and sight); `c` crate and `b` barrel (block movement only). Row 12 is at the top and column A is on the left.
 
-**Ruínas Atuais** (`ruinas-atuais`). É o mapa da V2.2: uma muralha central com um portão largo a oeste e uma passagem estreita a leste.
+**Current Ruins** (`ruinas-atuais`). The V2.2 map: a central wall with a wide gate to the west and a narrow passage to the east.
 
-```
+```text
 12  . . . . . . . . . . . .
 11  . . . . . . . . . . . .
 10  . . . O . . c . O . . .
@@ -155,9 +155,9 @@ Legenda dos traçados: `#` parede e `O` pilar (bloqueiam movimento e visão); `c
     A B C D E F G H I J K L
 ```
 
-**Fortaleza Abandonada** (`fortaleza-abandonada`). Um corredor central largo entre duas alas muradas. As alas dão cobertura total, mas só se entra nelas pelo corredor. Dois pilares dividem o centro.
+**Abandoned Fortress** (`fortaleza-abandonada`). A wide central corridor between two walled wings. The wings offer full cover, but can only be entered through the corridor. Two pillars split the center.
 
-```
+```text
 12  . . . . . . . . . . . .
 11  . . . . . . . . . . . .
 10  . . # # . . . . # # . .
@@ -173,9 +173,9 @@ Legenda dos traçados: `#` parede e `O` pilar (bloqueiam movimento e visão); `c
     A B C D E F G H I J K L
 ```
 
-**Pátio das Ruínas** (`patio-das-ruinas`). Um pátio aberto, com trechos de muro e pilares espalhados. Há muitas rotas e pouca cobertura contínua, o que favorece ataques à distância e flanqueio.
+**Ruined Courtyard** (`patio-das-ruinas`). An open courtyard with scattered wall segments and pillars. Many routes and sparse continuous cover, favoring ranged attacks and flanking.
 
-```
+```text
 12  . . . . . . . . . . . .
 11  . . . . . . . . . . . .
 10  . O . . . c . . . . O .
@@ -191,4 +191,4 @@ Legenda dos traçados: `#` parede e `O` pilar (bloqueiam movimento e visão); `c
     A B C D E F G H I J K L
 ```
 
-Os dois traçados novos são propostas. Foram conferidos por script: nenhum obstáculo nas linhas de nascimento e todas as células livres ligadas entre si. O equilíbrio de cada mapa ainda precisa ser medido em partidas simuladas.
+The two new layouts are proposals. They were verified by script: zero obstacles in spawn rows and all free cells mutually connected. Each map's balance still needs to be measured in simulated matches.

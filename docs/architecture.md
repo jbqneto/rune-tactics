@@ -1,430 +1,430 @@
-# Arquitetura atual e migração V2.1
+# Current Architecture and V2.1 Migration
 
-## Escopo e status
+## Scope and Status
 
-Diagnóstico por leitura dos arquivos no início da tarefa e execução de typecheck/testes. Outros agentes alteraram código e testes simultaneamente durante a documentação; referências ao comportamento da base abaixo descrevem a leitura inicial e precisam ser revalidadas após integração. A V2.1 deste brief é uma especificação de correção: ordem fixa, morte visual diferenciada por equipe e quadrados de alcance. Não é uma afirmação de que essas mudanças já existem.
+Diagnosis based on reading the source files at the start of the task and running typecheck/tests. Other agents modified code and tests concurrently during documentation; references to baseline behavior below describe the initial code reading and must be revalidated after integration. V2.1 in this brief is a corrective specification: fixed turn order, team-differentiated visual death, and basic attack range cells. It is not a claim that those changes already exist.
 
-A base se apresenta como V2.2 em `AGENTS.md` e `game-design.md`, mas ainda permite escolha manual de aliado e cadáveres de ambos os times. Esses comportamentos conflitam com o brief; a migração segue o pedido explícito sem introduzir funcionalidades V3/V4. `turn-system.md` detalha o alvo; `implementation-plan.md` organiza sua implementação. A observação antiga de que o motor ainda agia por time inteiro era incorreta: ativações individuais já estão implementadas.
+The baseline identifies itself as V2.2 in `AGENTS.md` and `game-design.md`, yet still allows manual ally selection and persistent corpses for both teams. Those behaviors conflict with the brief; the migration follows the explicit request without introducing V3/V4 features. `turn-system.md` details the target; `implementation-plan.md` organizes its implementation. The older note stating that the engine still acted per whole team was incorrect: individual activations are already implemented.
 
-## Camadas e dependências
+## Layers and Dependencies
 
-| Camada | Responsabilidade | Dependências permitidas |
+| Layer | Responsibility | Allowed Dependencies |
 |---|---|---|
-| `src/shared/` | Tipos, snapshots, comandos e eventos | Nenhuma dependência de runtime |
-| `src/config/` | Grade, obstáculos, stats, habilidades, spawns e futura ordem fixa | `shared` |
-| `src/game/` | Regras síncronas sem DOM/Three.js | `shared`, `config` |
-| `src/rendering/` | Cena Three.js, animações, unidades e quadrados | `shared`, Three.js; configuração visual aprovada |
-| `src/input/` | Raycast, mouse e modo de interação | `shared`, `rendering`, Three.js |
-| `src/ui/` | HUD, botões, retratos e feedback | `shared`, `config`, `input` |
-| `src/main.ts` | Composição, consumo de eventos e condução temporal da IA | Todas as camadas |
+| `src/shared/` | Types, snapshots, commands, and events | No runtime dependencies |
+| `src/config/` | Grid, obstacles, stats, skills, spawns, and future fixed order | `shared` |
+| `src/game/` | Synchronous rules without DOM/Three.js | `shared`, `config` |
+| `src/rendering/` | Three.js scene, animations, units, and board highlights | `shared`, Three.js; approved visual config |
+| `src/input/` | Raycasting, mouse handling, and interaction modes | `shared`, `rendering`, Three.js |
+| `src/ui/` | HUD, buttons, portraits, and feedback | `shared`, `config`, `input` |
+| `src/main.ts` | Composition, event consumption, and AI step pacing | All layers |
 
-Renderização, input e UI não importam `src/game/`; recebem apenas `IGameEngine`. Dano, movimento, alcance, LoS, recarga e agendamento pertencem ao motor. Os números de partida ficam em `gameConfig.ts`, sem cópias no HUD.
+Rendering, input, and UI must not import `src/game/`; they receive only `IGameEngine`. Damage, movement, range, LoS, cooldowns, and turn scheduling belong to the engine. Match numbers live in `gameConfig.ts`, with no copies in the HUD.
 
-### Módulos existentes
+### Existing Modules
 
-- `GameEngine.ts`: fachada, validação, cópia do snapshot, seleção e fila de eventos.
-- `turns/TurnSystem.ts`: elegibilidade, ativações individuais alternadas, rodada, recarga e fim de batalha; ainda não possui cursor de ordem fixa.
-- `grid/GridSystem.ts`: limites, obstáculos, ocupação dos vivos, Manhattan, BFS e LoS.
-- `combat/CombatSystem.ts`: ataques, alvos/áreas de habilidades, cura e morte.
-- `ai/EnemyAI.ts`: decisão de um passo, sem mutar estado.
-- `entities/UnitFactory.ts`: unidades a partir da configuração.
-- `BoardRenderer.ts`: tabuleiro e camadas de destaque.
-- `UnitRenderer.ts`: modelos, barras de HP, animações e sincronização dos vivos/mortos.
-- `HudManager.ts` e `InputManager.ts`: seleção, comandos e apresentação.
+- `GameEngine.ts`: facade, validation, snapshot copying, selection, and event queue.
+- `turns/TurnSystem.ts`: eligibility, alternating individual activations, rounds, cooldowns, and battle end; does not yet have a fixed-order cursor.
+- `grid/GridSystem.ts`: bounds, obstacles, living-unit occupancy, Manhattan distance, BFS, and LoS.
+- `combat/CombatSystem.ts`: attacks, skill targets/areas, healing, and death.
+- `ai/EnemyAI.ts`: single-step decision without mutating state.
+- `entities/UnitFactory.ts`: constructs units from config.
+- `BoardRenderer.ts`: board and highlight layers.
+- `UnitRenderer.ts`: models, HP bars, animations, and living/dead sync.
+- `HudManager.ts` and `InputManager.ts`: selection, commands, and presentation.
 
-## Fluxo de ação preservado
+## Preserved Action Flow
 
-1. Input/HUD solicita uma ação ao `IGameEngine`.
-2. O motor valida antes de mutar. Ação recusada retorna `{ ok: false, reason }`, sem eventos.
-3. Ação aceita aplica estado imediatamente e acumula fatos em `GameEvent[]`.
-4. `main.ts` consome os eventos, enfileira animações e sincroniza o snapshot; a interface bloqueia controles durante animação.
-5. A interface conduz a IA por `executeNextEnemyAction()` enquanto `turnState === 'enemy_activation'`, não pelo booleano retornado isoladamente.
+1. Input/HUD requests an action on `IGameEngine`.
+2. The engine validates before mutating. A rejected action returns `{ ok: false, reason }` with no events.
+3. An accepted action mutates state immediately and appends facts to `GameEvent[]`.
+4. `main.ts` consumes the events, enqueues animations, and syncs the snapshot; the UI locks controls during animations.
+5. The UI drives AI via `executeNextEnemyAction()` while `turnState === 'enemy_activation'`, not by relying on the returned boolean alone.
 
-O snapshot é uma cópia; eventos não comandam regras. `path` inclui origem e destino. `obstacleDefs` traz tipo/LoS; `obstacles` replica posições por compatibilidade. Coordenadas são coluna `x`, linha `y`, ambas 0 até `gridSize - 1`; só rendering converte para 3D.
+The snapshot is a copy; events do not drive rules. `path` includes origin and destination. `obstacleDefs` carries type/LoS; `obstacles` mirrors positions for compatibility. Coordinates are column `x`, row `y`, both `0` through `gridSize - 1`; only rendering converts to 3D.
 
-## Diagnóstico com evidências
+## Evidence-Based Diagnosis
 
-### 1. Escolha manual de aliado e ordem não fixa
+### 1. Manual Ally Selection and Unfixed Order
 
-- `TurnSystem.ts:8` e `:31–50`: início/reset em `awaiting_player_choice`, ativa nula até a primeira ação.
-- `GameEngine.ts:67–82`: `selectUnit` aceita qualquer aliado vivo quando não há trava.
-- `GameEngine.ts:273–276`: trava começa na primeira ação válida, não no início da vez.
-- `TurnSystem.ts:70–90`: próximo time é decidido por elegibilidade; não existe `turnOrder/currentIndex`.
-- `GameEngine.ts:190–192`: inimigo é o primeiro elegível da lista de unidades.
-- `gameConfig.ts:224–235`: spawns agrupam heróis antes dos inimigos; não são a ordem intercalada exigida.
-- `InputManager.ts:168–171`, `:244–248` e `HudManager.ts:193–195`: permitem trocar aliado antes da trava, seguindo o contrato antigo.
+- `TurnSystem.ts:8` and `:31–50`: starts/resets in `awaiting_player_choice`, active unit null until first action.
+- `GameEngine.ts:67–82`: `selectUnit` accepts any living ally when unlocked.
+- `GameEngine.ts:273–276`: lock begins on first valid action, not at start of turn.
+- `TurnSystem.ts:70–90`: next team is chosen by eligibility; no `turnOrder/currentIndex` exists.
+- `GameEngine.ts:190–192`: enemy chosen is the first eligible entry in the unit list.
+- `gameConfig.ts:224–235`: spawns group all heroes before enemies; not the required interleaved order.
+- `InputManager.ts:168–171`, `:244–248`, and `HudManager.ts:193–195`: allow switching allies before locking, following the old contract.
 
-Não é apenas erro visual: motor, contrato e UI concordam entre si, mas não com o alvo V2.1. A correção precisa fixar a ativa antes do primeiro clique e validar identidade ativa em todo comando/consulta operacional. A checagem atual `canUnitActNow` (`GameEngine.ts:254–259`) valida elegibilidade e trava, mas não fase/equipe quando destravado; revisar também consultas com `unitId` explícito durante vez inimiga e estado terminal.
+This is not merely a visual bug: engine, contract, and UI agree with one another, just not with the V2.1 target. The fix must lock the active unit before the first click and validate active identity on every operational command/query. The current `canUnitActNow` check (`GameEngine.ts:254–259`) validates eligibility and lock, but not phase/team when unlocked; also review queries taking an explicit `unitId` during enemy turns and terminal states.
 
-### 2. Morte sem distinção por equipe
+### 2. Death Without Team Differentiation
 
-- `UnitRenderer.ts:126–141`: sincronização define `root.visible = true` e deita todo morto, sem condição de equipe.
-- `UnitRenderer.ts:239–245`: `unitDied` produz a mesma animação `die` para qualquer unidade.
-- `HudManager.ts:200–206`: rótulos atuais são `Caído`, `Ativo`, `Ativado`, `Pronto`; não os quatro estados pedidos.
+- `UnitRenderer.ts:126–141`: sync sets `root.visible = true` and lays every dead unit flat, regardless of team.
+- `UnitRenderer.ts:239–245`: `unitDied` plays the same `die` animation for any unit.
+- `HudManager.ts:200–206`: current labels are `Fallen`, `Active`, `Acted`, `Ready`; not the four requested states.
 
-Inimigos mortos visíveis são comportamento explícito da base, não evidência de `alive` incorreto no motor. Aliados mortos já são deitados e perdem anel/HP; não afirmar que estão sempre visualmente idênticos aos vivos. O problema confirmado é a ausência de política visual por equipe e a nomenclatura/status de ativação divergentes. Legibilidade em câmera real ainda requer QA visual.
+Visible dead enemies are explicit baseline behavior, not evidence of an incorrect `alive` flag in the engine. Dead allies already lie flat and lose their ring/HP bar; do not claim they always look identical to living units. The confirmed issue is the lack of a team-based visual policy and divergent activation naming/status labels. Readability under the real camera still requires visual QA.
 
-Alvo: aliado morto permanece deitado na posição da queda, sem barra/anel/hitbox operacional; inimigo desaparece ao concluir a animação e continua invisível nos próximos `syncUnits`. Ambos permanecem em `units` e na ordem original para integridade lógica, sem bloquear movimento/LoS ou receber cura/ataque. Não filtrar inimigos mortos do estado para resolver apresentação. Reset deve restaurar pose, escala, visibilidade, HP e hitboxes; sincronização inicial de snapshot já morto deve aplicar a mesma política sem depender de `unitDied` recente.
+Target: dead allies remain lying at their fall position without HP bar/ring/clickable hitbox; dead enemies disappear upon finishing the death animation and stay invisible on subsequent `syncUnits` calls. Both remain in `units` and in the original turn order for logical integrity, without blocking movement/LoS or receiving healing/attacks. Do not filter dead enemies out of engine state to solve presentation. Reset must restore pose, scale, visibility, HP, and hitboxes; initial sync of an already-dead snapshot must apply the same policy without depending on a recent `unitDied` event.
 
-### 3. Não há quadrados de alcance básico em células vazias
+### 3. Missing Basic Attack Range Squares on Empty Cells
 
-- `types.ts:168–172` e `GameEngine.ts:95–99`: `getAttackableTargets` retorna unidades, não região.
-- `main.ts:113–127`: alimenta `attackable` apenas com posições dos alvos existentes.
-- `BoardRenderer.ts:4–11` e `:373–379`: desenha essa lista; não calcula nem recebe alcance completo.
+- `types.ts:168–172` and `GameEngine.ts:95–99`: `getAttackableTargets` returns units, not a region.
+- `main.ts:113–127`: feeds `attackable` solely with existing targets' positions.
+- `BoardRenderer.ts:4–11` and `:373–379`: draws that list; neither computes nor receives full range.
 
-Logo, o material vermelho já existe; faltam consulta de células e ligação dessa consulta à renderização. Não resolver duplicando Manhattan/LoS no renderer.
+Hence the red material already exists; what is missing is the cell query and wiring that query to rendering. Do not solve this by duplicating Manhattan/LoS checks in the renderer.
 
-## Contratos-alvo a aprovar antes do código
+## Target Contracts to Approve Before Coding
 
-`shared/types.ts` é compartilhado: t16 revisa e a coordenação aprova; t18 integra alterações do contrato do motor, t1b consome. Os nomes abaixo são propostas explícitas, não APIs já disponíveis.
+`shared/types.ts` is shared: t16 reviews and the coordinator approves; t18 integrates engine contract changes, t1b consumes them. Names below are explicit proposals, not already-available APIs.
 
-### Agendamento e seleção
+### Scheduling and Selection
 
-- Ordem fixa em configuração; `TurnScheduler` com `turnOrder`, `currentIndex`, `round`, `activeUnitId`, `hasMoved`, `hasAttacked`, conforme `turn-system.md`.
-- Snapshot pode expor cópias de `turnOrder/currentIndex` se a UI precisar; não expor arrays mutáveis internos. Não tornar essa extensão obrigatória sem necessidade aprovada.
-- `activeUnitId` é definido desde a abertura da ativação. `activationLocked` é verdadeiro durante toda ativação aliada. `awaiting_player_choice` deixa de ser estado operacional; remover ou manter só por compatibilidade requer atualização conjunta dos comentários e consumidores.
-- `selectedUnitId` acompanha a ativa para comandos. Inspeção opcional deve ficar separada e nunca autorizar ações da unidade inspecionada.
-- `activationStarted` passa a ocorrer na abertura da vez, inclusive início/reset, não na primeira ação. Evitar duplicação em `endPlayerTurn` e `ensurePlayerActivationStarted`.
+- Fixed order in configuration; `TurnScheduler` with `turnOrder`, `currentIndex`, `round`, `activeUnitId`, `hasMoved`, `hasAttacked`, per `turn-system.md`.
+- Snapshot may expose copies of `turnOrder/currentIndex` if the UI needs them; never expose internal mutable arrays. Do not make that extension mandatory without approved need.
+- `activeUnitId` is set from the opening of the activation. `activationLocked` is `true` throughout every allied activation. `awaiting_player_choice` ceases to be an operational state; removing it or keeping it only for compatibility requires coordinated updates to comments and consumers.
+- `selectedUnitId` tracks the active unit for commands. Optional inspection must stay separate and never authorize actions for the inspected unit.
+- `activationStarted` now fires at turn start, including match start/reset, rather than on the first action. Avoid duplicate emissions in `endPlayerTurn` and `ensurePlayerActivationStarted`.
 
-### Consultas de alcance e GRID_HIGHLIGHTS
+### Range Queries and `GRID_HIGHLIGHTS`
 
-Proposta: `getAttackRangeCells(unitId?: string): GridCoord[]` em `IGameEngine`, separada de `getAttackableTargets`.
+Proposal: `getAttackRangeCells(unitId?: string): GridCoord[]` on `IGameEngine`, separate from `getAttackableTargets`.
 
-Contrato recomendado para aprovação:
+Recommended contract for approval:
 
-- Consulta operacional pura, sem mutação/eventos; ID omitido usa a ativa aliada. Retorna vazio para ID inexistente, morto, não ativo, fase não aliada/terminal ou ataque já consumido.
-- Retorna células dentro da grade, distintas da origem, com distância Manhattan de 1 até `attackRange` e LoS quando alcance > 1.
-- Exclui células de obstáculos, inclusive obstáculos baixos; obstáculos baixos não impedem destacar células além deles. Não exige célula vazia: aliados, inimigos e cadáveres podem estar na região, sem virarem automaticamente alvos válidos.
-- `getAttackableTargets` continua filtrando inimigos vivos atacáveis. Preservar distinção entre região informativa e autorização de ataque.
-- Habilidades continuam usando `getSkillTargetCells` e `getSkillAreaCells`; não substituir sua semântica por alcance básico.
+- Pure operational query, no mutation/events; omitted ID uses the active ally. Returns empty for nonexistent ID, dead unit, non-active unit, non-allied/terminal phase, or already-spent attack.
+- Returns in-bounds cells distinct from origin with Manhattan distance 1 through `attackRange` and LoS when range > 1.
+- Excludes obstacle cells, including low obstacles; low obstacles do not prevent highlighting cells beyond them. Does not require empty cells: allies, enemies, and corpses may occupy cells in the region without automatically becoming valid targets.
+- `getAttackableTargets` continues filtering attackable living enemies. Preserve the distinction between informative region and attack authorization.
+- Skills continue using `getSkillTargetCells` and `getSkillAreaCells`; do not replace their semantics with basic attack range.
 
-`GRID_HIGHLIGHTS` ainda não existe na base: é proposta de configuração visual centralizada em `gameConfig.ts`, com cores/opacidades de movimento, alcance de ataque, alvo atacável, habilidade, cura, área e hover. Não guardar Three.js/DOM na config. `BoardHighlights` deve receber um campo de células de alcance separado de `attackable`; `main.ts` consulta o motor e repassa ambos. Proposta visual: alcance discreto abaixo do alvo atacável, habilidade/área e hover com prioridade explícita e sem z-fighting; cores finais são responsabilidade de t1b.
+`GRID_HIGHLIGHTS` does not yet exist in the baseline: it is a proposed centralized visual config in `gameConfig.ts` holding colors/opacities for movement, attack range, attackable target, skill, heal, area, and hover. Do not store Three.js/DOM objects in config. `BoardHighlights` should receive a range-cell field separate from `attackable`; `main.ts` queries the engine and passes both. Visual proposal: subtle range beneath attackable target, skill/area, and hover with explicit priority and no Z-fighting; final colors are t1b's responsibility.
 
-Ao trocar modo, ativa, rodada, reset ou terminar animação, limpar destaques obsoletos e recomputar por consulta. Não deixar a região da unidade anterior habilitar cliques.
+When switching modes, active unit, round, reset, or finishing animations, clear stale highlights and recompute via query. Never let the previous unit's region enable clicks.
 
-### Estados da interface
+### UI States
 
-Derivar do snapshot, nesta prioridade, sem novo estado gravável no HUD:
+Derive from snapshot in this exact priority, with no new writable HUD state:
 
-| Estado | Regra |
+| Status | Rule |
 |---|---|
-| `DERROTADO` | `!unit.alive`, independentemente de flags anteriores |
-| `EM TURNO` | Unidade viva cujo ID é `activeUnitId` |
-| `CONCLUÍDO` | Viva, não ativa e `hasActivatedThisRound` |
-| `AGUARDANDO` | Viva, não ativa e ainda não processada na rodada |
+| `DEFEATED` | `!unit.alive`, regardless of prior flags |
+| `ACTING` | Living unit whose ID is `activeUnitId` |
+| `DONE` | Living, not active, and `hasActivatedThisRound` |
+| `WAITING` | Living, not active, and not yet processed this round |
 
-Aplicar a heróis e lista inimiga quando pertinente. Estado final da batalha é separado desses rótulos. Botões dependem da ativa, flags, recarga, fase e bloqueio de animação, nunca apenas de seleção/elegibilidade. Clique em outro aliado não muda quem age.
+Apply to heroes and the enemy list where pertinent. Battle end state is separate from these labels. Buttons depend on active unit, flags, cooldown, phase, and animation lock, never solely on selection/eligibility. Clicking another ally never changes who acts.
 
-### Eventos preservados
+### Preserved Events
 
-Manter `unitMoved`, `skillUsed`, `unitAttacked`, `unitHealed`, `unitDied`, `activationStarted`, `activationEnded`, `roundStarted`, `turnChanged`, `battleEnded`, `gameReset`. Dano fatal emite ataque e morte; golpe final encerra em `battleEnded` antes de qualquer avanço. Mortos pulados não emitem ativação. Inimigos consecutivos precisam de `activationStarted` mesmo sem mudança de `phase`.
+Keep `unitMoved`, `skillUsed`, `unitAttacked`, `unitHealed`, `unitDied`, `activationStarted`, `activationEnded`, `roundStarted`, `turnChanged`, `battleEnded`, `gameReset`. Fatal damage emits attack then death; the killing blow ends in `battleEnded` before any turn advance. Skipped dead units emit no activation. Consecutive enemies need `activationStarted` even without a `phase` change.
 
-## Migração e verificação
+## Migration and Verification
 
-1. Aprovar diferenças de contrato e a política de cenários customizados, sem inferir ordem a partir de cliques.
-2. t18 implementa configuração/agendador e testes; depois consultas de alcance e sua validação.
-3. t1b adapta input, HUD, morte visual, `BoardHighlights` e composição em `main.ts`; a integração deste arquivo tem um único responsável.
-4. t16 revisa identidade ativa, fontes de verdade, eventos, limites de camadas e casos de morte/virada.
-5. t1c reconcilia documentação com a entrega efetivamente verificada, inclusive divergências de versão em arquivos fora deste escopo mediante autorização.
+1. Approve contract differences and custom scenario policy without inferring turn order from clicks.
+2. t18 implements config/scheduler and tests, then range queries and their validation.
+3. t1b adapts input, HUD, visual death, `BoardHighlights`, and composition in `main.ts`; `main.ts` integration has a single owner.
+4. t16 reviews active identity, sources of truth, events, layer boundaries, and death/wrap edge cases.
+5. t1c reconciles documentation with verified delivery, including version discrepancies in out-of-scope files with authorization.
 
-Baseline executada nesta análise: `npm run typecheck` passou; `npm test` passou com 113 testes em 4 arquivos. Isso valida a base, não os requisitos novos: os testes atuais inclusive exigem escolha livre (`tests/engine.test.ts:83`) e precisam ser migrados com equivalentes de ordem fixa. Na verificação final, com edições concorrentes em src/tests, typecheck passou, mas a suíte retornou 101 aprovados e 12 falhas em `engine.test.ts`, envolvendo expectativas antigas de estado inicial, seleção e eventos. Os próprios arquivos mudaram durante a execução; é necessária nova validação integrada por t18/t16 quando estabilizados. Este agente editou somente os três documentos. Não houve QA de navegador nesta tarefa documental. O diretório não é um repositório Git, portanto não há diff/status Git local disponível.
+Baseline run during this analysis: `npm run typecheck` passed; `npm test` passed with 113 tests across 4 files. That validates the baseline, not the new requirements: current tests even assert free selection (`tests/engine.test.ts:83`) and must be migrated to fixed-order equivalents. On final verification, with concurrent edits in `src`/`tests`, typecheck passed, while the suite returned 101 passed and 12 failures in `engine.test.ts` involving old expectations for initial state, selection, and events. Those files themselves changed during execution; fresh integrated validation by t18/t16 is required once stabilized. This agent edited only the three documents. No browser QA was run in this documentation task. The directory is not a Git repository, so no local Git diff/status is available.
 
-Assets permanecem em `public/assets/`, referenciados por retratos/ícones da configuração. Nenhum asset novo é necessário para esta migração; regras de arte continuam em `art-direction.md` e registro em `asset-generation.md`.
+Assets remain in `public/assets/`, referenced via portraits/icons in config. No new assets are required for this migration; art rules remain in `art-direction.md` and logs in `asset-generation.md`.
 
-# V2.2 (interface): câmera orbital, seleção sob personagens e orientação
+# V2.2 (Interface): Orbital Camera, Selection Under Characters, and Facing
 
-## Escopo e status
+## Scope and Status
 
-Esta seção é um diagnóstico e um desenho técnico; nada dela está implementado. Ela foi escrita a partir da leitura de `SceneManager.ts`, `InputManager.ts`, `UnitRenderer.ts`, `BoardRenderer.ts` e `main.ts`, sem rodar o jogo no navegador. As linhas citadas valem para os arquivos no momento da leitura.
+This section is a diagnosis and technical design; none of it is implemented yet. It was written from reading `SceneManager.ts`, `InputManager.ts`, `UnitRenderer.ts`, `BoardRenderer.ts`, and `main.ts`, without running the game in a browser. Cited line numbers apply to the files at read time.
 
-Os três objetivos são só de interface. O motor (`src/game/`), os contratos (`src/shared/types.ts`) e a config não mudam, então os testes do motor não são afetados. O plano de tarefas está em `implementation-plan.md`.
+All three goals are interface-only. The engine (`src/game/`), contracts (`src/shared/types.ts`), and config do not change, so engine tests are unaffected. The task plan is in `implementation-plan.md`.
 
-| Objetivo | Arquivos afetados |
+| Goal | Affected Files |
 |---|---|
-| 1. Rotação horizontal de 360° da câmera com botão direito + arraste | `SceneManager.ts`, `InputManager.ts`, `BoardRenderer.ts`, `main.ts` |
-| 2. Selecionar células livres encobertas por personagens, sem atravessar obstáculos sólidos | `InputManager.ts`, `BoardRenderer.ts` |
-| 3. Aliados se viram para o inimigo vivo mais próximo depois de andar | `UnitRenderer.ts` |
+| 1. 360° horizontal camera rotation via right-click + drag | `SceneManager.ts`, `InputManager.ts`, `BoardRenderer.ts`, `main.ts` |
+| 2. Select free cells occluded by characters without passing through solid obstacles | `InputManager.ts`, `BoardRenderer.ts` |
+| 3. Allies face the nearest living enemy after moving | `UnitRenderer.ts` |
 
-## Objetivo 1: rotação da câmera
+## Goal 1: Camera Rotation
 
-### Diagnóstico
+### Diagnosis
 
-- **A câmera é fixa.** `SceneManager.ts:33-34` posiciona a câmera ortográfica em `(17, 18.5, 17)` olhando para `(0, 0.25, 0)` e nunca mais a move. Isso equivale a um azimute de 45°, uma elevação de cerca de 37° e uma distância horizontal de `17·√2 ≈ 24`. Não existe estado de órbita.
-- **O botão direito já tem uso.** `InputManager.ts:59-66` trata `contextmenu` como "cancelar o modo de ataque ou habilidade". `onPointerDown` ignora qualquer botão que não seja o esquerdo (`:184`). Um arraste com o botão direito hoje dispara o cancelamento ao soltar.
-- **O cenário foi montado para uma única vista.** `BoardRenderer.ts:233-246` cria os muros do perímetro com até 1,8 de altura nos lados `-x` e `-z`, com o comentário de que ficam "atrás do tabuleiro". Com a câmera do outro lado, eles passam à frente e cobrem as primeiras fileiras. Os postes das tochas (`:252-275`, 1,35 de altura) têm o mesmo problema nos cantos.
-- **O perímetro não entra no raycast.** `pickTarget` (`InputManager.ts:89-93`) só considera hitboxes de unidade, obstáculos internos e tiles. Um muro de perímetro que cubra o tabuleiro deixaria o clique atravessá-lo.
-- **O que já acompanha a câmera sem mudança:** as barras de HP são reprojetadas a cada quadro (`UnitRenderer.ts:717-742`); o raycast usa a câmera recebida; luzes, sombras, destaques, caminho e animações estão em coordenadas de mundo. O enquadramento ortográfico (`frustumSize = 17.5`) comporta o tabuleiro em qualquer azimute, porque a pior largura é a diagonal de 12 células, cerca de 17.
+- **The camera is fixed.** `SceneManager.ts:33-34` places the orthographic camera at `(17, 18.5, 17)` looking at `(0, 0.25, 0)` and never moves it again. That equals a 45° azimuth, ~37° elevation, and horizontal distance `17·√2 ≈ 24`. No orbit state exists.
+- **Right-click already has a binding.** `InputManager.ts:59-66` handles `contextmenu` as "cancel attack or skill mode". `onPointerDown` ignores any button other than left-click (`:184`). Currently, a right-click drag triggers cancellation on release.
+- **Scenery was built for a single angle.** `BoardRenderer.ts:233-246` builds perimeter walls up to height 1.8 on the `-x` and `-z` sides, with a comment saying they sit "behind the board". When the camera moves to the opposite side, they move in front and cover the front rows. Torch posts (`:252-275`, height 1.35) have the same issue at corners.
+- **The perimeter is excluded from raycasting.** `pickTarget` (`InputManager.ts:89-93`) only checks unit hitboxes, internal obstacles, and tiles. A perimeter wall covering the board would let clicks pass straight through it.
+- **What already follows the camera unchanged:** HP bars re-project every frame (`UnitRenderer.ts:717-742`); raycasting uses the passed camera; lights, shadows, highlights, paths, and animations live in world space. The orthographic frustum (`frustumSize = 17.5`) fits the board at any azimuth because the widest span is the 12-cell diagonal, ~17.
 
-### Desenho
+### Design
 
-- **Estado de órbita em `SceneManager`.** Guardar `azimuth` em radianos e derivar a posição: `x = R·sin(azimuth)`, `z = R·cos(azimuth)`, `y = 18.5`, com `R = 17·√2`, seguido de `lookAt` no mesmo alvo. O valor inicial `π/4` reproduz a vista atual. A elevação e a distância não mudam: a rotação é só horizontal.
-- **API:** `rotateAzimuth(deltaRad)` e `get azimuth`. O ângulo é normalizado para `[0, 2π)`, sem limite, o que dá os 360° contínuos. Depois de mover a câmera, chamar `camera.updateMatrixWorld()`, para que um raycast feito antes do próximo quadro não use a matriz antiga.
-- **Gesto em `InputManager`.** Botão direito pressionado inicia um arraste candidato. Passado um limiar de poucos pixels, vira rotação: cada `pointermove` converte o deslocamento horizontal em ângulo e chama um callback novo, `onRotateCamera(deltaRad)`. Soltar sem ter passado do limiar mantém o comportamento atual de cancelar o modo. `contextmenu` continua com `preventDefault`, mas deixa de cancelar o modo: o cancelamento passa para o `pointerup` do clique sem arraste.
-- **Captura do ponteiro.** Usar `setPointerCapture` no início do arraste e encerrar em `pointerup`, `pointercancel` e `lostpointercapture`, para a rotação não ficar presa quando o cursor passa sobre o HUD ou sai da janela.
-- **A rotação não depende da vez.** Ela é só visualização, então vale durante o turno inimigo e durante animações. O tratamento do arraste vem antes de `isInputBlocked()`. Enquanto o arraste está ativo, hover e clique ficam suspensos e o destaque de hover é limpo.
-- **Quem move a câmera.** `InputManager` não altera a câmera: ele emite o callback, e `main.ts` o liga a `sceneManager.rotateAzimuth`. A câmera continua sendo passada ao `InputManager` só para o raycast.
-- **Perímetro.** `BoardRenderer` ganha `setCameraAzimuth(azimuth)`, que esconde as peças altas do perímetro (muros e postes) que estão do lado da câmera e mostra as do lado oposto. Com isso elas não cobrem o tabuleiro nem precisam entrar no raycast. `main.ts` chama esse método depois de cada rotação e uma vez no início.
-- **Estado de vista, não de jogo.** O azimute não vai para o motor nem para o snapshot, e `reset()` não o altera.
+- **Orbit state in `SceneManager`.** Store `azimuth` in radians and derive position: `x = R·sin(azimuth)`, `z = R·cos(azimuth)`, `y = 18.5`, with `R = 17·√2`, followed by `lookAt` on the same target. Initial value `π/4` reproduces the current view. Elevation and distance stay constant: rotation is horizontal only.
+- **API:** `rotateAzimuth(deltaRad)` and `get azimuth`. The angle normalizes into `[0, 2π)` without clamping, giving continuous 360° orbit. After moving the camera, call `camera.updateMatrixWorld()` so any raycast before the next frame never uses a stale matrix.
+- **Gesture in `InputManager`.** Right button down starts a drag candidate. Once past a few-pixel threshold, it becomes rotation: each `pointermove` converts horizontal delta into an angle and invokes a new callback, `onRotateCamera(deltaRad)`. Releasing without exceeding the threshold preserves the current mode-cancel behavior. `contextmenu` keeps `preventDefault`, but stops canceling the mode: mode cancellation moves to `pointerup` on a stationary click.
+- **Pointer capture.** Use `setPointerCapture` on drag start and release on `pointerup`, `pointercancel`, and `lostpointercapture` so rotation never gets stuck when the cursor crosses the HUD or leaves the window.
+- **Rotation is turn-independent.** It is purely visual, so it works during enemy turns and animations. Drag handling runs before `isInputBlocked()`. While dragging, hover and click are suspended and hover highlights clear.
+- **Who moves the camera.** `InputManager` never mutates the camera: it emits the callback, and `main.ts` wires it to `sceneManager.rotateAzimuth`. The camera continues to be passed to `InputManager` solely for raycasting.
+- **Perimeter.** `BoardRenderer` gains `setCameraAzimuth(azimuth)`, hiding tall perimeter pieces (walls and posts) on the camera's side and showing those on the far side. Thus they never cover the board and need not enter raycasting. `main.ts` calls this after each rotation and once at startup.
+- **View state, not game state.** Azimuth never enters the engine or snapshot, and `reset()` does not alter it.
 
-### Parte pura e testável
+### Pure and Testable Logic
 
-A matemática da órbita (normalização do ângulo, posição a partir do azimute, pixels para radianos) e a decisão "clique ou arraste" não dependem de Three.js nem do DOM. Elas ficam em um módulo sem essas importações, por exemplo `src/rendering/cameraOrbit.ts`, e são testadas em Node.
+Orbit math (angle normalization, position from azimuth, pixels to radians) and the "click vs. drag" decision need neither Three.js nor the DOM. They belong in a dedicated module without those imports, e.g., `src/rendering/cameraOrbit.ts`, tested in Node.
 
-## Objetivo 2: seleção de células encobertas
+## Goal 2: Selecting Occluded Cells
 
-### Diagnóstico
+### Diagnosis
 
-- **O primeiro objeto atingido decide tudo.** `pickTarget` lança o raio contra hitboxes, obstáculos e tiles e usa só `hits[0]` (`InputManager.ts:94-99`). Se o primeiro é uma hitbox, o resultado é a unidade e a célula dela (`:101-107`).
-- **A hitbox cobre as células de trás.** Ela é uma caixa de `0.75 × 1.25 × 0.75` (`UnitRenderer.ts:768-772`). Com a câmera a 37° de elevação, uma caixa de 1,25 de altura cobre na tela cerca de 1,6 célula de chão atrás da unidade. Essas células não podem ser escolhidas como destino, e o problema cresce quando as unidades se agrupam.
-- **Obstáculos já bloqueiam o clique, mas por omissão.** As malhas de obstáculo estão na lista de alvos (`BoardRenderer.ts:374`), sem `userData`. Quando uma é o primeiro acerto, `pickTarget` não acha unidade nem célula e devolve nulo (`:114`). O comportamento é o desejado, só que depende de um campo ausente.
-- **Cadáveres não atrapalham.** `getUnitHitboxes` só devolve unidades vivas e visíveis (`UnitRenderer.ts:376-384`).
+- **The first hit decides everything.** `pickTarget` casts a ray against hitboxes, obstacles, and tiles and reads only `hits[0]` (`InputManager.ts:94-99`). If the first hit is a hitbox, the result is that unit and its cell (`:101-107`).
+- **Hitboxes cover cells behind them.** Each hitbox is `0.75 × 1.25 × 0.75` (`UnitRenderer.ts:768-772`). With a 37° camera elevation, a 1.25-tall box covers roughly 1.6 floor cells behind the unit on screen. Those cells cannot be picked as move targets, and the problem worsens as units cluster.
+- **Obstacles already block clicks, but by omission.** Obstacle meshes are in the target list (`BoardRenderer.ts:374`) without `userData`. When one is the first hit, `pickTarget` finds neither unit nor cell and returns null (`:114`). The behavior is right, only it relies on an absent field.
+- **Corpses don't interfere.** `getUnitHitboxes` only returns living, visible units (`UnitRenderer.ts:376-384`).
 
-### Desenho
+### Design
 
-O raio já devolve todos os acertos em ordem de distância. A mudança é percorrer a lista em vez de parar no primeiro:
+The raycaster already returns all intersections sorted by distance. The change is iterating the list instead of stopping at the first item:
 
-1. Percorrer os acertos do mais próximo ao mais distante.
-2. A primeira hitbox encontrada vira a **unidade candidata**. As hitboxes seguintes são ignoradas.
-3. O primeiro tile encontrado vira a **célula de chão** e encerra a busca.
-4. Um obstáculo encerra a busca na hora. O que está atrás dele não é selecionável.
+1. Walk hits from nearest to farthest.
+2. The first hitbox encountered becomes the **candidate unit**. Subsequent hitboxes are ignored.
+3. The first tile encountered becomes the **ground cell** and stops the walk.
+4. Any obstacle immediately stops the walk. Everything behind it is unselectable.
 
-O resultado é um par (unidade candidata, célula de chão), e qualquer um dos dois pode faltar. A escolha entre eles depende do modo e usa só as consultas que o `InputManager` já faz ao motor:
+The output is a `(candidateUnit, groundCell)` pair, either of which may be absent. Choosing between them depends on mode and uses only the queries `InputManager` already makes on the engine:
 
-| Modo | Preferência |
+| Mode | Preference |
 |---|---|
-| `attack` | A unidade candidata, se for alvo atacável. Senão, nada |
-| `skill` | A célula da unidade candidata, se for alvo válido da habilidade. Senão a célula de chão, se for alvo válido |
-| `default` | A unidade candidata, se for alvo atacável. Senão a célula de chão, se for alcançável. Senão a unidade candidata, para hover e inspeção |
+| `attack` | Candidate unit if attackable target; otherwise nothing |
+| `skill` | Candidate unit's cell if valid skill target; else ground cell if valid target |
+| `default` | Candidate unit if attackable target; else ground cell if reachable; else candidate unit for hover/inspection |
 
-Regras complementares:
+Additional rules:
 
-- **Hover e clique usam o mesmo resolvedor.** O destaque sob o cursor mostra exatamente o que o clique vai escolher.
-- **Todo obstáculo interno bloqueia a seleção**, inclusive caixote e barril: são sólidos na tela, mesmo sem bloquear a linha de visão das regras. As malhas passam a levar uma marca explícita em `userData` (por exemplo `kind: 'obstacle'`), e as hitboxes e os tiles ganham marcas equivalentes.
-- **Ambiguidade conhecida.** No modo `default`, se a unidade sob o cursor é atacável e a célula atrás dela é alcançável, a unidade ganha. Para escolher a célula, o jogador gira a câmera (objetivo 1). Se o QA mostrar que isso incomoda, o refinamento é decidir pela altura do ponto de impacto na hitbox; ele não faz parte desta entrega.
-- **Sem regra de jogo na interface.** O resolvedor compara ids e células com as listas vindas do motor (`getAttackableTargets`, `getReachableCells`, `getSkillTargetCells`). Ele não calcula alcance, caminho nem linha de visão.
+- **Hover and click share the same resolver.** The cursor highlight always matches what clicking will choose.
+- **Every internal obstacle blocks selection**, including crates and barrels: they are visually solid even if they don't block rule LoS. Meshes receive an explicit `userData` tag (e.g., `kind: 'obstacle'`), with equivalent tags on hitboxes and tiles.
+- **Known ambiguity.** In `default` mode, if the unit under the cursor is attackable and the cell behind it is reachable, the unit wins. To pick the cell, the player orbits the camera (Goal 1). If QA shows this feels awkward, the refinement is deciding by hit height on the hitbox; that is outside this delivery.
+- **No game rules in UI.** The resolver compares IDs and cells against engine lists (`getAttackableTargets`, `getReachableCells`, `getSkillTargetCells`). It never calculates range, paths, or line of sight.
 
-### Parte pura e testável
+### Pure and Testable Logic
 
-O resolvedor recebe uma lista de acertos já classificados (`unit`, `tile`, `obstacle`) e o contexto do modo, e devolve a escolha. Ele não precisa de Three.js: a conversão de `THREE.Intersection` para essa lista fica no `InputManager`, e o resolvedor vai para um módulo próprio, por exemplo `src/input/pickResolver.ts`, testado em Node.
+The resolver takes an already-classified list of hits (`unit`, `tile`, `obstacle`) and mode context, and returns the pick. It needs no Three.js: converting `THREE.Intersection` into that list stays in `InputManager`, and the resolver moves to a dedicated module, e.g., `src/input/pickResolver.ts`, tested in Node.
 
-## Objetivo 3: orientação dos aliados
+## Goal 3: Ally Facing
 
-### Diagnóstico
+### Diagnosis
 
-- **Não existe estado de orientação.** Nem `UnitState` nem `UnitVisual` guardam para onde a unidade olha.
-- **A orientação só existe durante a animação.** O movimento vira o corpo para a direção do passo (`UnitRenderer.ts:417`) e os ataques viram o atacante para o alvo (`:428`, `:472`, `:520`).
-- **Toda sincronização a desfaz.** `syncUnits` zera a rotação de cada unidade viva que não está animando (`UnitRenderer.ts:133`), e é chamado depois de toda ação e ao fim de cada fila de animação (`:631-635`). Por isso as unidades voltam sempre à pose padrão.
-- **A pose padrão olha para `+Z`**, que é o lado sul do tabuleiro. Os heróis começam no sul, então ficam de costas para os inimigos.
+- **No facing state exists.** Neither `UnitState` nor `UnitVisual` stores where a unit is looking.
+- **Facing only exists during animations.** Movement rotates the body along each step (`UnitRenderer.ts:417`) and attacks rotate the attacker toward its target (`:428`, `:472`, `:520`).
+- **Every sync wipes it.** `syncUnits` resets rotation on every non-animating living unit (`UnitRenderer.ts:133`), and is called after every action and at the end of every animation queue (`:631-635`). Thus units always snap back to the default pose.
+- **The default pose faces `+Z`**, which is the south side of the board. Heroes spawn in the south, so they start with their backs to the enemies.
 
-### Desenho
+### Design
 
-- **Orientação é apresentação.** Nenhuma regra depende dela (não há ataque pelas costas), então ela fica no renderer: `UnitVisual` ganha `facingY`. O contrato do motor não muda.
-- **`syncUnits` passa a aplicar `facingY`** em vez de zerar a rotação. Isso corrige a perda de orientação para todas as unidades.
-- **Toda animação que vira o corpo grava `facingY`.** Assim a unidade continua virada para onde andou ou para quem atacou.
-- **Depois de andar, o aliado se vira para o inimigo vivo mais próximo.** Ao fim da animação de movimento de uma unidade do jogador, o renderer calcula o alvo no snapshot mais recente e gira o corpo pelo menor arco, em uma transição curta.
-- **Critério de "mais próximo":** distância de Manhattan na grade, como nas regras; no empate, a menor distância em linha reta; persistindo o empate, a ordem da lista de unidades. O resultado é determinístico.
-- **Ângulo:** com `dx = alvo.x − unidade.x` e `dy = alvo.y − unidade.y` em células, `facingY = atan2(dx, −dy)`. O sinal de `dy` é invertido porque a linha da grade cresce no sentido `−Z` (`BoardRenderer.gridToWorld`).
-- **Sem inimigo vivo**, a orientação atual é mantida.
-- **Inimigos** não se reorientam sozinhos: mantêm a direção do último passo ou ataque, o que já vem de gravar `facingY`.
-- **Cadáveres** continuam com a pose deitada atual. **`gameReset`** devolve `facingY` ao valor inicial.
-- **Independente da câmera.** A orientação é em coordenadas de mundo e não muda com o azimute.
+- **Facing is presentation.** No rule depends on it (no backstab mechanic), so it lives in the renderer: `UnitVisual` gains `facingY`. The engine contract does not change.
+- **`syncUnits` applies `facingY`** instead of resetting rotation to zero. This fixes orientation loss for all units.
+- **Every body-turning animation updates `facingY`.** That way units keep facing where they walked or who they attacked.
+- **After moving, an ally turns to face the nearest living enemy.** At the end of a player unit's move animation, the renderer computes the target from the latest snapshot and rotates the body along the shortest arc in a short transition.
+- **"Nearest" criteria:** grid Manhattan distance, matching rules; on ties, shortest Euclidean distance; if still tied, unit list order. The result is deterministic.
+- **Angle:** with `dx = target.x - unit.x` and `dy = target.y - unit.y` in cells, `facingY = atan2(dx, -dy)`. The sign of `dy` is inverted because grid rows increase along `-Z` (`BoardRenderer.gridToWorld`).
+- **With no living enemy**, current facing is preserved.
+- **Enemies** do not auto-reorient: they keep the direction of their last step or attack, which naturally follows from storing `facingY`.
+- **Corpses** keep their current lying pose. **`gameReset`** resets `facingY` to its initial value.
+- **Camera-independent.** Facing is in world coordinates and does not change with azimuth.
 
-### Decisão em aberto
+### Open Decision
 
-O pedido cobre a orientação depois de andar. Fica para a coordenação decidir se os aliados também nascem virados para o inimigo mais próximo; sem isso, eles começam a batalha de costas até o primeiro movimento. A recomendação é aplicar a mesma função na criação do visual.
+The request covers facing after moving. It is up to the coordinator whether allies also spawn facing the nearest enemy; without that, they start battle facing away until their first move. Recommendation: apply the same helper during visual creation.
 
-### Parte pura e testável
+### Pure and Testable Logic
 
-A escolha do inimigo mais próximo e o cálculo do ângulo usam só `UnitState` e aritmética. Elas ficam em um módulo sem Three.js, por exemplo `src/rendering/facing.ts`, testado em Node.
+Picking the nearest enemy and computing the angle use only `UnitState` and arithmetic. They belong in a Three.js-free module, e.g., `src/rendering/facing.ts`, tested in Node.
 
-## Limites de camada na V2.2
+## Layer Boundaries in V2.2
 
-- `SceneManager` é o único que move a câmera. `InputManager` detecta o gesto e emite um callback.
-- `InputManager` não importa `src/game/`. A seleção compara os acertos do raio com respostas do motor.
-- O critério de "inimigo mais próximo" para a orientação é cosmético e pode ficar no renderer. Se uma regra futura depender de orientação, ela passa para o motor e para o contrato.
-- Os três módulos puros novos não importam Three.js nem acessam o DOM, para poderem ser testados em Node junto com o motor.
+- `SceneManager` is the only class that moves the camera. `InputManager` detects the gesture and emits a callback.
+- `InputManager` does not import `src/game/`. Selection compares ray hits against engine responses.
+- The "nearest enemy" criterion for facing is cosmetic and may stay in the renderer. If any future rule depends on facing, it moves into the engine and contract.
+- The three new pure modules neither import Three.js nor access the DOM so they can be tested in Node alongside the engine.
 
-# V2.3: sete melhorias de combate, interface e mapas
+# V2.3: Seven Combat, UI, and Map Improvements
 
-## Escopo e status
+## Scope and Status
 
-Esta seção é diagnóstico e desenho. Só os contratos em `src/shared/types.ts` já foram alterados; `src/game/`, `src/rendering/`, `src/ui/`, `src/input/`, `src/config/` e `tests/` ainda não. Por isso `npm run typecheck` acusa hoje que `GameEngine` não implementa os métodos e campos novos; o erro some quando o motor for atualizado. O diagnóstico vem da leitura do código, sem rodar o jogo no navegador.
+This section is diagnosis and design. Only the contracts in `src/shared/types.ts` have been updated so far; `src/game/`, `src/rendering/`, `src/ui/`, `src/input/`, `src/config/`, and `tests/` have not. Consequently `npm run typecheck` currently reports that `GameEngine` does not implement the new methods and fields; that error disappears once the engine is updated. Diagnosis is from code reading without running in a browser.
 
-| # | Melhoria | Camadas |
+| # | Improvement | Layers |
 |---|---|---|
-| 1 | Arcane Burst com um projétil e uma explosão central | renderização |
-| 2 | Atalho `E` para encerrar o turno | HUD |
-| 3 | Opacidade 1,0 na unidade ativa e 0,75 nas demais vivas | renderização, `main.ts` |
-| 4 | Ataque inteligente com o menor deslocamento | contrato, motor, input, destaques |
-| 5 | Desfazer o movimento, uma vez por ativação | contrato, motor, HUD, renderização |
-| 6 | Posições iniciais sorteadas nas duas primeiras linhas, com semente | contrato, config, motor |
-| 7 | Três mapas, sorteados sem repetir o anterior | contrato, config, motor, `main.ts`, HUD |
+| 1 | Arcane Burst with single projectile and central explosion | rendering |
+| 2 | `E` shortcut to end turn | HUD |
+| 3 | 1.0 opacity on active unit and 0.75 on other living units | rendering, `main.ts` |
+| 4 | Smart attack with shortest move | contract, engine, input, highlights |
+| 5 | Undo move, once per activation | contract, engine, HUD, rendering |
+| 6 | Seeded randomized starting positions in first two rows | contract, config, engine |
+| 7 | Three maps, picked without repeating the previous one | contract, config, engine, `main.ts`, HUD |
 
-## Contratos adicionados
+## Added Contracts
 
-Tudo em `src/shared/types.ts`, com os detalhes nos comentários de cada item.
+Everything is in `src/shared/types.ts`, with details in each item's doc comments.
 
-| Item | O que é |
+| Item | What It Is |
 |---|---|
 | `MapConfig` | `id`, `name`, `gridSize`, `obstacles`, `playerSpawnRows`, `enemySpawnRows` |
-| `SmartActionPlan` | `{ path }`: o que o ataque ou a habilidade inteligente faria agora |
-| `GameStateSnapshot.mapId`, `mapName` | Mapa sorteado para a batalha |
-| `GameStateSnapshot.seed` | Semente que gerou o mapa e as posições iniciais |
-| `GameStateSnapshot.canUndoMove` | `undoMove()` seria aceito agora |
-| Evento `moveUndone` | `{ unitId, path }`, com `path` da célula atual de volta à de origem |
-| `undoMove()` | Desfaz o movimento da ativação |
-| `smartAttack(targetId)` | Ataca; se preciso, anda antes pelo menor caminho |
-| `smartUseSkill(targetCell)` | O mesmo para a habilidade |
-| `getSmartAttackPlan(targetId)`, `getSmartSkillPlan(targetCell)` | Consultas puras para a interface mostrar o plano antes do clique |
+| `SmartActionPlan` | `{ path }`: what smart attack or smart skill would do right now |
+| `GameStateSnapshot.mapId`, `mapName` | Map picked for the battle |
+| `GameStateSnapshot.seed` | Seed that generated the map and starting positions |
+| `GameStateSnapshot.canUndoMove` | Whether `undoMove()` would be accepted right now |
+| `moveUndone` event | `{ unitId, path }`, with `path` from current cell back to origin |
+| `undoMove()` | Undoes the activation's movement |
+| `smartAttack(targetId)` | Attacks; if needed, walks first along the shortest path |
+| `smartUseSkill(targetCell)` | Same for skill |
+| `getSmartAttackPlan(targetId)`, `getSmartSkillPlan(targetCell)` | Pure queries for the UI to preview the plan before clicking |
 
-Três itens vão além do pedido original e ficam para a coordenação confirmar: `seed` no snapshot, `SmartActionPlan` e as duas consultas de plano. Sem as consultas, a interface teria de recalcular alcance e caminho para mostrar a prévia, o que as regras de camada proíbem.
+Three items go beyond the original request and await coordinator confirmation: `seed` on snapshot, `SmartActionPlan`, and the two plan queries. Without the queries, the UI would have to recalculate range and paths to draw previews, which layer rules forbid.
 
-O comentário de `reset()` também mudou: ele agora sorteia outro mapa, então a interface precisa reconstruir o tabuleiro.
+The `reset()` comment also changed: it now rolls another map, so the UI must rebuild the board.
 
-## 1. Arcane Burst: um projétil e uma explosão
+## 1. Arcane Burst: One Projectile and One Explosion
 
-### Diagnóstico
+### Diagnosis
 
-O motor está correto. `resolveSkill` (`CombatSystem.ts:109`) emite um `skillUsed` com a célula alvo e, em seguida, um `unitAttacked` por inimigo atingido, cada um com `isRanged: true` e `skillId: 'arcane-burst'`.
+The engine is correct. `resolveSkill` (`CombatSystem.ts:109`) emits one `skillUsed` with the target cell, followed by one `unitAttacked` per hit enemy, each with `isRanged: true` and `skillId: 'arcane-burst'`.
 
-O defeito está em `UnitRenderer.enqueueEvents`, que transforma cada evento em uma animação independente, na ordem em que chegam:
+The bug is in `UnitRenderer.enqueueEvents`, which turns every event into a standalone animation in arrival order:
 
-- **`skillUsed` vira a explosão, e ela toca primeiro** (`UnitRenderer.ts:184-197`). A animação `skillVfx` desenha o anel e o orbe na célula alvo antes de qualquer projétil sair do mago.
-- **Cada `unitAttacked` vira um projétil próprio** (`:198-222`). Como o evento tem `isRanged`, entra na fila um `rangedAttack` do mago até aquele inimigo. O campo `skillId` só é usado para escolher a cor.
-- **A fila toca uma animação por vez.** Com três inimigos na área, o jogador vê a explosão no centro e depois três projéteis, um após o outro, cada um aplicando o dano do seu alvo.
+- **`skillUsed` becomes the explosion, and it plays first** (`UnitRenderer.ts:184-197`). The `skillVfx` animation draws the ring and orb on the target cell before any projectile leaves the mage.
+- **Each `unitAttacked` becomes its own projectile** (`:198-222`). Because the event has `isRanged`, a `rangedAttack` from mage to that enemy gets queued. `skillId` is only used to pick color.
+- **The queue plays one animation at a time.** With three enemies in the area, the player sees the explosion at center and then three sequential projectiles, each applying damage to its target.
 
-O esperado é o inverso: um projétil do mago até o centro, a explosão no impacto e o dano em todos os atingidos ao mesmo tempo. O Marked Shot tem a mesma inversão em menor grau: a mira aparece no alvo antes de a flecha sair.
+Expected behavior is the reverse: one projectile from mage to center, explosion on impact, and damage applied to all hit targets simultaneously. Marked Shot suffers the same inversion to a lesser degree: the reticle appears on the target before the arrow leaves.
 
-### Desenho
+### Design
 
-- **Agrupar os eventos da habilidade antes de enfileirar.** Ao encontrar um `skillUsed`, o renderer consome os `unitAttacked` seguintes que tenham o mesmo `skillId` e `attackerId` igual ao `casterId`, e monta uma única animação composta.
-- **Animação composta para habilidade à distância:** projétil do lançador até `targetCell`; no impacto, o efeito da habilidade (a explosão em cruz do Arcane Burst, a mira do Marked Shot); no mesmo instante, a reação de dano e a barra de HP de todos os atingidos.
-- **Habilidade corpo a corpo** (Runic Strike, `isRanged` falso) continua com a animação de golpe atual.
-- **As mortes vêm depois.** Os `unitDied` intercalados entram na fila só depois da animação composta, na ordem recebida.
-- **Barras de HP.** `isPendingAttackTarget` precisa reconhecer a animação composta, para a barra dos atingidos não cair antes do impacto.
-- **Garantia do motor que isso usa:** os eventos de uma habilidade são contíguos e chegam no mesmo lote de `consumeEvents()`. Isso já é verdade, porque `useSkill` é síncrono, e passa a ser parte do contrato.
+- **Group skill events before queuing.** Upon seeing `skillUsed`, the renderer consumes following `unitAttacked` events matching `skillId` and `attackerId === casterId`, building one composite animation.
+- **Composite animation for ranged skills:** projectile from caster to `targetCell`; on impact, skill VFX (Arcane Burst cross explosion, Marked Shot reticle); at that exact instant, hit reactions and HP bar updates for all affected targets.
+- **Melee skills** (Runic Strike, `isRanged` false) keep the current melee strike animation.
+- **Deaths come afterward.** Interleaved `unitDied` events enter the queue only after the composite animation, in received order.
+- **HP bars.** `isPendingAttackTarget` must recognize the composite animation so hit targets' HP bars do not drop before impact.
+- **Engine guarantee relied upon:** events of a skill are contiguous and arrive in the same `consumeEvents()` batch. This already holds because `useSkill` is synchronous, and becomes part of the contract.
 
-O agrupamento não precisa de Three.js: recebe `GameEvent[]` e devolve descrições de animação. Ele vai para um módulo próprio, por exemplo `src/rendering/eventGrouping.ts`, testado em Node.
+Grouping needs no Three.js: it takes `GameEvent[]` and returns animation descriptors. It goes into a dedicated module, e.g., `src/rendering/eventGrouping.ts`, tested in Node.
 
-## 2. Atalho `E`
+## 2. `E` Shortcut
 
-- **Estado atual:** o botão diz "Encerrar Turno" (`HudManager.ts:107`) e só responde a clique (`:150`). Não há nenhum ouvinte de teclado no projeto.
-- **Desenho:** `HudManager` registra um `keydown` na janela e chama o mesmo `callbacks.onEndTurn()` do clique. Assim as travas existentes continuam valendo: a de animação em `main.ts:45-46` e a recusa do motor fora da vez do jogador.
-- **Quando o atalho é ignorado:** botão desabilitado, tela de resultado aberta, `event.repeat`, Ctrl, Alt ou Meta pressionados, ou foco em campo de texto.
-- **Tecla:** comparar `event.key` em minúscula com `e`, para respeitar o layout do teclado.
-- **Rótulo:** "Encerrar turno (E)", com `aria-keyshortcuts="E"`. O ouvinte é removido em `dispose()`.
+- **Current state:** the button says "End Turn" (`HudManager.ts:107`) and only listens for clicks (`:150`). There is no keyboard listener in the project.
+- **Design:** `HudManager` registers a `keydown` listener on `window` and invokes the same `callbacks.onEndTurn()` as clicking. Existing locks still apply: animation lock in `main.ts:45-46` and engine rejection outside the player's turn.
+- **When ignored:** button disabled, result modal open, `event.repeat`, Ctrl/Alt/Meta held, or focus in a text input.
+- **Key:** compare `event.key.toLowerCase()` against `'e'` to respect keyboard layouts.
+- **Label:** `"End Turn (E)"` with `aria-keyshortcuts="E"`. Remove the listener in `dispose()`.
 
-## 3. Opacidade da unidade ativa
+## 3. Active Unit Opacity
 
-- **Estado atual:** os materiais do corpo são opacos. Cada unidade cria os seus (`UnitRenderer.ts`, funções `build*`), então a opacidade pode variar por unidade. `syncUnits` recebe a unidade selecionada, mas não a ativa; durante a vez inimiga a seleção é nula.
-- **Regra:**
+- **Current state:** body materials are opaque. Each unit creates its own (`UnitRenderer.ts`, `build*` functions), so opacity can vary per unit. `syncUnits` receives the selected unit, not the active one; during enemy turns selection is null.
+- **Rule:**
 
-| Situação | Opacidade do corpo |
+| Situation | Body Opacity |
 |---|---|
-| Unidade viva com a ativação aberta (`activeUnitId`) | 1,0 |
-| Demais unidades vivas, dos dois times | 0,75 |
-| Batalha encerrada, sem unidade ativa | 1,0 para todas as vivas |
-| Cadáveres | Sem mudança |
+| Living unit with open activation (`activeUnitId`) | 1.0 |
+| Other living units on both teams | 0.75 |
+| Battle ended, no active unit | 1.0 for all living units |
+| Corpses | Unchanged |
 
-- **Desenho:** `syncUnits` passa a receber `activeUnitId`. Cada `UnitVisual` guarda a lista de materiais do corpo, coletada na criação. Ao aplicar a opacidade, ajustar `transparent` e `opacity`, e marcar `needsUpdate` quando `transparent` mudar. O anel da base e a barra de HP não mudam.
-- **Os dois valores ficam em uma constante nomeada**, em um só lugar.
-- **Risco visual:** material translúcido deixa ver o piso e as partes internas do modelo, e entra na ordenação de transparentes. Manter `depthWrite` ligado reduz o problema, mas ele precisa ser conferido no navegador, em vários ângulos de câmera.
+- **Design:** `syncUnits` now takes `activeUnitId`. Each `UnitVisual` stores its list of body materials collected at creation. When setting opacity, update `transparent` and `opacity`, and flag `needsUpdate` whenever `transparent` changes. Base ring and HP bar do not change.
+- **Both values live in named constants** in one place.
+- **Visual risk:** translucent materials reveal the floor and interior model parts and enter transparent draw sorting. Keeping `depthWrite` enabled mitigates this, but it needs browser verification across multiple camera angles.
 
-## 4. Ataque inteligente
+## 4. Smart Attack
 
-### Regra, implementada só no motor
+### Rule, Implemented Solely in the Engine
 
-1. Valem as recusas de `attackTarget`: não é a vez do jogador, a unidade já atacou, o alvo não existe, está morto ou é aliado.
-2. Se o alvo já pode ser atacado de onde a unidade está, ataca. O movimento não é gasto.
-3. Senão, se a unidade já se moveu, recusa.
-4. Senão, entre as células alcançáveis nesta ativação, ficam as de onde o ataque vale: dentro do alcance e, para alcance acima de 1, com linha de visão.
-5. A escolhida é a de menor custo de movimento. No empate, a de menor distância de Manhattan até o alvo. Persistindo, a de menor `y` e depois menor `x`.
-6. Sem candidata, recusa. Com candidata, a unidade anda e ataca: `unitMoved`, `unitAttacked` e, se for o caso, `unitDied`.
-7. A checagem pós-ação roda uma vez, ao final. Com movimento e ataque gastos, a ativação termina sozinha, salvo vitória no golpe.
+1. All `attackTarget` rejections apply: not player's turn, unit already attacked, target missing, dead, or allied.
+2. If the target is already attackable from the unit's current cell, attack. Movement is not spent.
+3. Else, if the unit has already moved, reject.
+4. Else, among reachable cells in this activation, keep those from which the attack is valid: within range and, for range > 1, with line of sight.
+5. Pick the one with lowest movement cost. On ties, lowest Manhattan distance to target. If still tied, lowest `y` then lowest `x`.
+6. No candidate: reject. With candidate: unit moves and attacks: `unitMoved`, `unitAttacked`, and if applicable `unitDied`.
+7. Post-action check runs once at the end. With both move and attack spent, the activation auto-ends unless the blow wins the battle.
 
-A ação é atômica: ou acontecem o movimento e o ataque, ou nada muda e nenhum evento sai. O custo de movimento é o número de passos do menor caminho, porque todo passo custa 1.
+The action is atomic: either both move and attack happen, or nothing changes and zero events emit. Movement cost equals shortest path step count since every step costs 1.
 
-`smartUseSkill` segue a mesma sequência, trocando "ataque vale" por "`targetCell` é alvo válido da habilidade a partir daquela célula" e medindo a distância até `targetCell`. Para isso, a validação de alvo de habilidade em `CombatSystem` precisa aceitar a posição do lançador como parâmetro, em vez de ler `caster.pos`.
+`smartUseSkill` follows the exact same sequence, replacing "attack is valid" with "`targetCell` is a valid skill target from that cell" and measuring distance to `targetCell`. To support this, skill target validation in `CombatSystem` must accept a caster position parameter rather than reading `caster.pos`.
 
 ### Interface
 
-- **Clique.** No modo padrão e no modo de ataque, clicar em um inimigo chama `smartAttack`. No modo de habilidade, clicar em uma célula chama `smartUseSkill`.
-- **Prévia obrigatória.** O ataque inteligente anda e ataca em um clique, sem volta. No hover, a interface consulta `getSmartAttackPlan` ou `getSmartSkillPlan` e desenha o caminho e a célula de destino antes do clique.
-- **Destaque.** Um inimigo que só é atacável depois de andar recebe um destaque diferente do inimigo atacável de onde a unidade está. A lista vem de `getSmartAttackPlan` chamado para cada inimigo vivo.
-- **Sem regra na interface.** `InputManager` não escolhe a célula nem calcula caminho.
+- **Click.** In default and attack modes, clicking an enemy calls `smartAttack`. In skill mode, clicking a cell calls `smartUseSkill`.
+- **Mandatory preview.** Smart attack moves and attacks in one click, with no take-backs. On hover, the UI queries `getSmartAttackPlan` or `getSmartSkillPlan` and draws the path and destination cell before clicking.
+- **Highlight.** An enemy only attackable after moving gets a distinct highlight from one attackable in place. That list comes from calling `getSmartAttackPlan` for each living enemy.
+- **No rules in UI.** `InputManager` never chooses the cell or computes paths.
 
-## 5. Desfazer o movimento
+## 5. Undo Move
 
-- **O motor guarda o último movimento manual** da ativação: unidade, célula de origem e caminho. O registro é apagado ao atacar, ao usar habilidade, ao encerrar a ativação e no `reset()`.
-- **`undoMove()`** devolve a unidade à origem, põe `hasMoved` em `false` e emite `moveUndone` com o caminho de volta. Não encerra a ativação e não muda mais nada.
-- **Uma vez por ativação.** Depois de desfazer, a unidade pode se mover de novo, mas esse segundo movimento é definitivo.
-- **Quando não vale:** fora da vez do jogador; sem movimento feito; depois de atacar ou usar habilidade; quando o movimento veio de `smartAttack` ou `smartUseSkill`; quando o desfazer já foi usado. `canUndoMove` no snapshot resume essas condições.
-- **Por que é seguro:** o movimento não revela informação, não sorteia nada e não dispara reação inimiga, então voltar atrás não dá vantagem.
-- **Atacar e depois mover** encerra a ativação na hora, então nesse caso não há o que desfazer.
-- **Interface:** um botão "Desfazer movimento", habilitado por `canUndoMove` e fora de animação. `moveUndone` é animado como um movimento pelo caminho recebido, e a unidade se reorienta ao final como depois de qualquer movimento.
+- **The engine stores the last manual move** of the activation: unit, origin cell, and path. This record clears on attack, skill use, activation end, and `reset()`.
+- **`undoMove()`** returns the unit to origin, sets `hasMoved` to `false`, and emits `moveUndone` with the return path. It does not end the activation or alter anything else.
+- **Once per activation.** After undoing, the unit can move again, but that second move is final.
+- **When disallowed:** outside player's turn; no move made; after attacking or using a skill; when movement came from `smartAttack` or `smartUseSkill`; when undo was already used. `canUndoMove` on snapshot summarizes these conditions.
+- **Why it is safe:** moving reveals no hidden information, triggers no RNG, and provokes no enemy reaction, so taking a step back grants no unfair edge.
+- **Attacking then moving** ends the activation immediately, so there is nothing to undo in that order.
+- **UI:** an "Undo Move" button, enabled when `canUndoMove` is true and no animation is playing. `moveUndone` animates as a walk along the returned path, and the unit reorients afterward just like after any move.
 
-## 6. Posições iniciais sorteadas
+## 6. Seeded Randomized Starting Positions
 
-- **Estado atual:** `INITIAL_UNITS` em `gameConfig.ts` fixa a posição de cada unidade.
-- **Desenho:** a lista de unidades passa a trazer só id, tipo e time. Cada mapa declara `playerSpawnRows` e `enemySpawnRows`: as duas linhas do sul para os heróis e as duas do norte para os inimigos.
-- **Sorteio:** para cada unidade, na ordem da lista, o motor sorteia uma célula entre as livres das linhas do seu time. Livre significa sem obstáculo e ainda não sorteada.
-- **Semente.** Todo sorteio do motor sai de um gerador com semente, em um módulo próprio de `src/game/`. A mesma semente produz o mesmo mapa e as mesmas posições. Sem semente informada, o motor gera uma; é o único ponto em que usa uma fonte não determinística.
-- **Ordem de consumo do gerador:** mapa, depois heróis na ordem da lista, depois inimigos na ordem da lista. Mudar essa ordem muda o resultado de uma semente, então ela é parte do contrato.
-- **Reinício.** O gerador continua de onde parou. Uma semente inicial fixa produz sempre a mesma sequência de batalhas, o que os testes usam.
-- **Cenários de teste.** Um cenário que informa posições explícitas não passa pelo sorteio. Os testes atuais, que montam situações exatas, continuam valendo.
-- **A ordem de turno não muda:** ela depende dos ids, não das posições.
+- **Current state:** `INITIAL_UNITS` in `gameConfig.ts` hardcodes every unit's position.
+- **Design:** the unit list carries only id, type, and team. Each map declares `playerSpawnRows` and `enemySpawnRows`: the two southern rows for heroes and two northern rows for enemies.
+- **Rolling:** for each unit in list order, the engine picks a random free cell from its team's rows. Free means no obstacle and not already taken.
+- **Seed.** All engine randomness comes from a seeded PRNG in a dedicated `src/game/` module. The same seed yields the same map and positions. When no seed is provided, the engine generates one; that is the sole point using a non-deterministic source.
+- **PRNG consumption order:** map first, then heroes in list order, then enemies in list order. Changing this order changes the output of a seed, so it is part of the contract.
+- **Reset.** The PRNG continues from where it left off. A fixed initial seed always yields the same sequence of battles, which tests rely on.
+- **Test scenarios.** A scenario passing explicit positions bypasses random spawns. Existing tests setting up exact board states keep working.
+- **Turn order does not change:** it depends on unit IDs, not positions.
 
-## 7. Três mapas
+## 7. Three Maps
 
-- **Config:** `MAPS: MapConfig[]` em `gameConfig.ts`, com "Ruínas Atuais" (os obstáculos de hoje), "Fortaleza Abandonada" e "Pátio das Ruínas". Os traçados propostos estão em `game-design.md`.
-- **Restrições de todo mapa**, conferidas por teste: grade 12×12; linhas de nascimento sem obstáculo; todas as células livres ligadas entre si; nenhum obstáculo duplicado.
-- **A grade fica em 12×12 nos três.** O enquadramento da câmera, as tochas e o perímetro em `SceneManager` e `BoardRenderer` foram dimensionados para esse tamanho. `MapConfig.gridSize` existe para o futuro.
-- **Sorteio sem repetição:** a cada batalha nova, o motor sorteia entre os mapas diferentes do anterior. Na primeira batalha, qualquer um serve.
-- **Entre recarregamentos da página** o motor não lembra o mapa anterior. Se a coordenação quiser a garantia também nesse caso, `main.ts` guarda o último `mapId` no armazenamento do navegador e o informa ao criar o motor. Fica como decisão em aberto.
-- **Interface:** `main.ts` hoje constrói o tabuleiro uma única vez (`main.ts:203`) e não o refaz no reinício (`main.ts:55-60`). Com mapas sorteados, ele precisa chamar `buildBoard` de novo quando recebe `gameReset`. `buildBoard` já remove as malhas antigas, mas não libera geometrias e materiais; isso precisa ser corrigido para não acumular memória a cada reinício.
-- **HUD:** mostra `mapName`.
+- **Config:** `MAPS: MapConfig[]` in `gameConfig.ts`, containing "Current Ruins" (today's obstacles), "Abandoned Fortress", and "Ruined Courtyard". Proposed layouts are in `game-design.md`.
+- **Constraints on every map**, verified by test: 12×12 grid; obstacle-free spawn rows; all free cells connected; no duplicate obstacles.
+- **Grid stays 12×12 across all three.** Camera framing, torches, and perimeter in `SceneManager` and `BoardRenderer` were sized for 12×12. `MapConfig.gridSize` exists for future expansion.
+- **Non-repeating roll:** on each new battle, the engine rolls among maps different from the previous one. On the first battle, any map works.
+- **Across page reloads**, the engine forgets the previous map. If the coordinator wants that guarantee across reloads too, `main.ts` stores the last `mapId` in browser storage and passes it on engine creation. Left as an open decision.
+- **UI:** `main.ts` currently builds the board once (`main.ts:203`) and never rebuilds on reset (`main.ts:55-60`). With randomized maps, it must call `buildBoard` again on `gameReset`. `buildBoard` already removes old meshes, but does not dispose geometries and materials; that must be fixed to avoid leaking memory on every reset.
+- **HUD:** displays `mapName`.
 
-## Limites de camada na V2.3
+## Layer Boundaries in V2.3
 
-- A escolha da célula do ataque inteligente, a validade do desfazer, o sorteio de mapa e o de posições são regras: ficam em `src/game/`.
-- O motor não usa `Math.random` nas regras. Todo sorteio passa pelo gerador com semente.
-- A interface mostra a prévia a partir das consultas de plano. Ela não calcula alcance, caminho nem linha de visão.
-- O agrupamento de eventos de habilidade e a regra de opacidade são apresentação: ficam no renderer.
-- O atalho de teclado chama o mesmo caminho do botão, para não haver duas versões das travas.
+- Choosing the smart-attack cell, undo validity, map selection, and spawn rolling are rules: they live in `src/game/`.
+- The engine never uses `Math.random` in rules. All rolls go through the seeded PRNG.
+- The UI renders previews from plan queries. It never computes range, paths, or line of sight.
+- Skill event grouping and opacity rules are presentation: they live in the renderer.
+- Keyboard shortcuts invoke the same path as buttons, preventing duplicate locks.
 
 ---
 
-# V4: Campanha, Atributos, Defesa e Novos Inimigos
+# V4: Campaign, Attributes, Defend, and New Enemies
 
-## Escopo e Diretrizes Arquiteturais
+## Scope and Architectural Guidelines
 
-A V4 (*The Ashen Campaign*) evolui a base estável da V3 preservando integralmente:
-- Separação rígida de camadas (`src/shared/`, `src/config/`, `src/game/` nunca importam Three.js nem acessam o DOM; `src/rendering/`, `src/input/`, `src/ui/` comunicam-se apenas via `IGameEngine` e contratos de `src/shared/types.ts`).
-- Ordem fixa intercalada de ativações (`TurnSystem`), grid 12×12, linha de visão (`GridSystem`), `smartAttack`, `smartUseSkill`, `undoMove`, câmera orbital e identidade visual V3.
-- Fonte única de números de partida em `src/config/gameConfig.ts`.
+V4 (*The Ashen Campaign*) builds on the stable V3 base while fully preserving:
+- Strict layer separation (`src/shared/`, `src/config/`, `src/game/` never import Three.js or access the DOM; `src/rendering/`, `src/input/`, `src/ui/` communicate solely via `IGameEngine` and `src/shared/types.ts` contracts).
+- Fixed interleaved activation order (`TurnSystem`), 12×12 grid, line of sight (`GridSystem`), `smartAttack`, `smartUseSkill`, `undoMove`, orbital camera, and V3 visual identity.
+- Single source of truth for match numbers in `src/config/gameConfig.ts`.
 
-As especificações detalhadas de regras estão distribuídas nos documentos complementares:
+Detailed rule specifications live in the companion documents:
 - [attribute-system.md](attribute-system.md)
 - [combat-system.md](combat-system.md)
 - [campaign-design.md](campaign-design.md)
 - [enemy-design.md](enemy-design.md)
 - [balance-config.md](balance-config.md)
 
-## Novos Módulos em `src/game/`
+## New Modules in `src/game/`
 
-Todos os módulos novos permanecem puros (sem Three.js, sem `window`/`document`), testáveis diretamente em Node via Vitest:
+All new modules remain pure (no Three.js, no `window`/`document`), directly testable in Node via Vitest:
 
-| Módulo | Responsabilidade |
+| Module | Responsibility |
 |---|---|
-| `src/game/attributes/AttributeSystem.ts` | Funções puras de atributos: `offensiveBonus`, `calcMaxHp`, `fortitudeResistance`, `getAttributeForAttack`, `applyAttributePoint` (inclusive regra de aumento de `fort`) e validação contra `MAX_ATTRIBUTE`. |
-| `src/game/campaign/CampaignSystem.ts` | Máquina de estado da campanha de 5 fases: inicialização de campanha, geração de `GameSetup` por fase (incluindo HP/atributos persistidos dos heróis), captura pós-vitória, recuperação (`+35%` vivos / revive `25%`), concessão e alocação de pontos, restauração por checkpoint e avanço de fase. |
-| `src/game/campaign/SaveSystem.ts` | Serialização, desserialização, validação de esquema versionado (`version: 4`, chave `'rune_tactics_v4_save'`) e persistência via interface injetável `StorageAdapter` (sem acesso direto ao DOM em `src/game/`). |
+| `src/game/attributes/AttributeSystem.ts` | Pure attribute functions: `offensiveBonus`, `calcMaxHp`, `fortitudeResistance`, `getAttributeForAttack`, `applyAttributePoint` (including `fort` upgrade rule), and validation against `MAX_ATTRIBUTE`. |
+| `src/game/campaign/CampaignSystem.ts` | 5-stage campaign state machine: campaign initialization, per-stage `GameSetup` generation (including persisted hero HP/attributes), post-victory capture, recovery (`+35%` living / `25%` revive), point granting and allocation, checkpoint restoration, and stage advancement. |
+| `src/game/campaign/SaveSystem.ts` | Serialization, deserialization, versioned schema validation (`version: 4`, key `'rune_tactics_v4_save'`), and persistence via an injectable `StorageAdapter` (no direct DOM access in `src/game/`). |
 
-> **Separação entre batalha e campanha**: `GameEngine` continua responsável exclusivamente por uma batalha tática (`IGameEngine`), recebendo via `GameSetup` o contexto da fase (`mode`, `stageNumber`, `stageName`, `mapId`, overrides de heróis/atributos/HP e `enemies`). `CampaignSystem` orquestra a jornada entre as 5 fases e instancia/reinicia o `GameEngine` a cada fase. A camada `src/main.ts` conecta `window.localStorage` ao `StorageAdapter` passado ao `SaveSystem`.
+> **Separation between battle and campaign**: `GameEngine` remains solely responsible for a single tactical battle (`IGameEngine`), receiving stage context (`mode`, `stageNumber`, `stageName`, `mapId`, hero/attribute/HP overrides, and `enemies`) via `GameSetup`. `CampaignSystem` orchestrates the 5-stage journey and instantiates/resets `GameEngine` for each stage. `src/main.ts` wires `window.localStorage` into the `StorageAdapter` passed to `SaveSystem`.
 
-## Contratos em `src/shared/types.ts`
+## Contracts in `src/shared/types.ts`
 
-### 1. Tipos Básicos e Enumerações
+### 1. Basic Types and Unions
 
 ```ts
 export type AttributeKey = 'str' | 'dex' | 'int' | 'fort';
@@ -457,35 +457,35 @@ export type SkillId =
 export type ObstacleKind = 'wall' | 'pillar' | 'crate' | 'barrel' | 'water';
 ```
 
-- `water` possui `blocksLos: false` (bloqueia movimento, não bloqueia linha de visão).
-- `MapConfig` ganha campos opcionais puramente visuais: `theme?: 'ruins' | 'swamp' | 'fortress' | 'catacombs' | 'sanctuary'` e `bridgeCells?: GridCoord[]`.
+- `water` has `blocksLos: false` (blocks movement, does not block line of sight).
+- `MapConfig` adds purely visual optional fields: `theme?: 'ruins' | 'swamp' | 'fortress' | 'catacombs' | 'sanctuary'` and `bridgeCells?: GridCoord[]`.
 
-### 2. Extensão de `UnitState`
+### 2. `UnitState` Extensions
 
-Campos adicionados/unificados em `UnitState`:
+Added/unified fields on `UnitState`:
 
 ```ts
 export interface UnitState {
-  // ...campos preservados de V2.3/V3...
+  // ...preserved V2.3/V3 fields...
   attributes: UnitAttributes;
   baseHp: number;
   baseArmor: number;
   basePower: number;
   attackKind: AttackKind;
-  /** Poder efetivo do ataque básico (`basePower + offensiveBonus(mainAttr)`), derivado para HUD/consulta. */
+  /** Effective basic attack power (`basePower + offensiveBonus(mainAttr)`), derived for HUD/queries. */
   damage: number;
-  /** Defesa efetiva (`baseArmor + fortitudeResistance(attributes.fort)`), derivada para HUD/consulta. */
+  /** Effective defense (`baseArmor + fortitudeResistance(attributes.fort)`), derived for HUD/queries. */
   armor: number;
-  /** Postura defensiva de 50% de mitigação até a próxima ativação da própria unidade. */
+  /** Defensive stance providing 50% mitigation until the unit's next activation. */
   isGuarding: boolean;
-  /** Fase atual para unidades chefe com múltiplas fases (`1` > 50% HP, `2` <= 50% HP irreversível). */
+  /** Current phase for multi-phase boss units (`1` > 50% HP, `2` <= 50% HP irreversible). */
   bossPhase?: 1 | 2;
 }
 ```
 
-- **Unificação de `defend()`**: o campo legado `shield: number` e `shieldAbsorbed?: number` são removidos (junto de `GUARD_SHIELD` e `SHIELD_WALL_BONUS` em `gameConfig.ts`). A postura defensiva é representada unicamente por `isGuarding: boolean`, e `unitGuarded` simplifica para `{ type: 'unitGuarded'; unitId: string }`. `unitAttacked` recebe `wasGuarded?: boolean` e `pendingAttackId?: string` opcionais.
+- **Unifying `defend()`**: legacy `shield: number` and `shieldAbsorbed?: number` are removed (along with `GUARD_SHIELD` and `SHIELD_WALL_BONUS` in `gameConfig.ts`). Defensive stance is represented solely by `isGuarding: boolean`, and `unitGuarded` simplifies to `{ type: 'unitGuarded'; unitId: string }`. `unitAttacked` receives optional `wasGuarded?: boolean` and `pendingAttackId?: string`.
 
-### 3. Ataques Anunciados (`PendingAttack`) e Snapshot
+### 3. Telegraphed Attacks (`PendingAttack`) and Snapshot
 
 ```ts
 export interface PendingAttack {
@@ -499,13 +499,13 @@ export interface PendingAttack {
 }
 ```
 
-`GameStateSnapshot` passa a incluir:
+`GameStateSnapshot` now includes:
 - `mode: GameMode`
 - `stageNumber?: number`
 - `stageName?: string`
-- `pendingAttacks: PendingAttack[]` (cópia profunda de arrays/coordenadas)
+- `pendingAttacks: PendingAttack[]` (deep copy of arrays/coordinates)
 
-### 4. Novos `GameEvent`
+### 4. New `GameEvent` Variants
 
 ```ts
 | { type: 'unitGuarded'; unitId: string }
@@ -522,12 +522,12 @@ export interface PendingAttack {
 | { type: 'bossPhaseChanged'; unitId: string; phase: 2; newMoveRange: number }
 ```
 
-Invariantes de eventos V4:
-- Ao iniciar a ativação de `nextUnit` em `TurnSystem.advanceTurn` (ou imediatamente na sequência em `GameEngine`), `nextUnit.isGuarding` é zerado antes de emitir `activationStarted`, e quaisquer `PendingAttack` de `nextUnit.id` são resolvidos imediatamente se `nextUnit.alive === true`, emitindo `pendingAttackResolved` → `unitAttacked[]` → `unitDied[]` contíguos no mesmo lote antes de `checkBattleEnd`.
-- Se uma unidade com `PendingAttack` morre antes de sua próxima ativação, o motor cancela seus ataques pendentes imediatamente após `unitDied`, emitindo `attackCancelled`.
-- A transição do chefe para `bossPhase = 2` dispara `bossPhaseChanged` no máximo uma vez por batalha e não restaura HP.
+V4 event invariants:
+- Upon starting `nextUnit`'s activation in `TurnSystem.advanceTurn` (or immediately afterward in `GameEngine`), `nextUnit.isGuarding` is cleared before emitting `activationStarted`, and any `PendingAttack` belonging to `nextUnit.id` resolves immediately if `nextUnit.alive === true`, emitting `pendingAttackResolved` → `unitAttacked[]` → `unitDied[]` contiguously in the same batch before `checkBattleEnd`.
+- If a unit with a `PendingAttack` dies before its next activation, the engine cancels its pending attacks immediately after `unitDied`, emitting `attackCancelled`.
+- The boss transition to `bossPhase = 2` emits `bossPhaseChanged` at most once per battle and restores zero HP.
 
-### 5. Contratos de Campanha e Persistência (`src/shared/types.ts`)
+### 5. Campaign and Persistence Contracts (`src/shared/types.ts`)
 
 ```ts
 export interface StageUnitSpawn {
@@ -578,18 +578,18 @@ export interface StorageAdapter {
 }
 ```
 
-## Impacto nas Camadas de Apresentação
+## Impact on Presentation Layers
 
 - **`BoardRenderer.ts`**:
-  - Novo obstáculo `'water'` (plano rebaixado translúcido de pântano) e renderização opcional de `bridgeCells` (tábuas de ponte de madeira) para `forgotten-swamp`.
-  - Ambientação sombria/brasas para `corrupted-sanctuary`.
-  - Nova camada de destaque `dangerCells` (`pendingAttacks`) em vermelho/âmbar pulsante no tabuleiro, indicando células ameaçadas por ataques anunciados.
+  - New `'water'` obstacle (recessed translucent swamp plane) and optional rendering of `bridgeCells` (wooden bridge planks) for `forgotten-swamp`.
+  - Dark/ember atmosphere for `corrupted-sanctuary`.
+  - New `dangerCells` highlight layer (`pendingAttacks`) in pulsing red/amber on the board, indicating cells threatened by telegraphed attacks.
 - **`CharacterVisualController.ts` & `UnitRenderer.ts`**:
-  - Inclusão dos 4 novos `UnitType` em `MODEL_SPECS` reaproveitando `.glb` KayKit com `targetHeight` e `tintHex`/`tintStrength` distintos (conforme `docs/enemy-design.md`).
-  - Aura defensiva ligada a `unit.alive && unit.isGuarding` (substituindo `unit.shield > 0`).
-  - Agrupamento visual para `pendingAttackResolved` (explosão das cinzas cobrindo todas as `targetCells` simultaneamente) e efeito de brasa em `bossPhaseChanged`.
+  - Added the 4 new `UnitType` values to `MODEL_SPECS` reusing KayKit `.glb` models with distinct `targetHeight` and `tintHex`/`tintStrength` (per `docs/enemy-design.md`).
+  - Defensive aura tied to `unit.alive && unit.isGuarding` (replacing `unit.shield > 0`).
+  - Visual grouping for `pendingAttackResolved` (ashen explosion covering all `targetCells` simultaneously) and ember aura VFX on `bossPhaseChanged`.
 - **`HudManager.ts` & `main.ts`**:
-  - Tela inicial / seletor de modo (**Campanha** — Nova / Continuar — vs. **Batalha Rápida**).
-  - Exibição de atributos (`STR`, `DEX`, `INT`, `FORT`, `DEF`) no card de unidade, indicador de fase (`Fase X/5 — Nome`) e badge de `Defesa (-50%)`.
-  - Modal/Tela de **Acampamento & Evolução** entre fases (recuperação + distribuição de pontos com prévia de impacto).
-  - Modal de **Derrota** com botões **"Reiniciar fase (Checkpoint)"** e **"Nova campanha"** quando em modo campanha, mantendo **"Jogar novamente"** na Batalha Rápida.
+  - Start screen / mode selector (**Campaign** — New / Continue — vs. **Quick Battle**).
+  - Attribute readout (`STR`, `DEX`, `INT`, `FORT`, `DEF`) on the unit card, stage indicator (`Stage X/5 — Name`), and `Defending (-50%)` badge.
+  - **Camp & Evolution** modal/screen between stages (recovery + point allocation with impact preview).
+  - **Defeat** modal with **"Restart Stage (Checkpoint)"** and **"New Campaign"** buttons in Campaign mode, keeping **"Play Again"** in Quick Battle.
