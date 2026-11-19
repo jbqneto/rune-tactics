@@ -35,8 +35,8 @@ const bossAt = (x: number, y: number, id = 'ashen-guardian-1'): UnitSpawn => ({
   pos: { x, y },
 });
 
-describe('V4 Inimigos: goblin-stalker', () => {
-  it('prioriza alvos frágeis (menor HP e menor defesa) ao invés do guerreiro', () => {
+describe('V4 Enemies: goblin-stalker', () => {
+  it('prioritizes fragile targets (lowest HP and lowest defense) over the knight', () => {
     const knight = unit(knightAt(1, 0)); // 12 HP, 1 DEF
     const mage = unit(mageAt(0, 1)); // 7 HP, 0 DEF
     const stalker = unit(stalkerAt(1, 1));
@@ -45,7 +45,7 @@ describe('V4 Inimigos: goblin-stalker', () => {
     expect(action).toEqual({ type: 'attack', target: mage });
   });
 
-  it('desempata por menor defesa quando HP é igual', () => {
+  it('breaks ties by lowest defense when HP is equal', () => {
     const knight = unit(knightAt(1, 0), { hp: 7 }); // 1 DEF
     const mage = unit(mageAt(0, 1), { hp: 7 }); // 0 DEF
     const stalker = unit(stalkerAt(1, 1));
@@ -54,7 +54,7 @@ describe('V4 Inimigos: goblin-stalker', () => {
     expect(action).toEqual({ type: 'attack', target: mage });
   });
 
-  it('avança até 4 células para alcançar alvo frágil na retaguarda', () => {
+  it('advances up to 4 cells to reach a fragile backline target', () => {
     const knight = unit(knightAt(4, 2));
     const mage = unit(mageAt(4, 6));
     const stalker = unit(stalkerAt(4, 9));
@@ -68,16 +68,16 @@ describe('V4 Inimigos: goblin-stalker', () => {
   });
 });
 
-describe('V4 Inimigos: skeleton-shieldbearer', () => {
-  it('usa defend quando está abaixo de 50% de HP e sem golpe letal', () => {
-    const knight = unit(knightAt(2, 2)); // 12 HP, não morre para 2 ATK
-    const shieldbearer = unit(shieldbearerAt(2, 3), { hp: 5 }); // <= 50% de 11 HP
+describe('V4 Enemies: skeleton-shieldbearer', () => {
+  it('uses defend when below 50% HP and has no lethal blow', () => {
+    const knight = unit(knightAt(2, 2)); // 12 HP, survives 2 ATK
+    const shieldbearer = unit(shieldbearerAt(2, 3), { hp: 5 }); // <= 50% of 11 HP
 
     const action = nextEnemyAction(shieldbearer, [knight, shieldbearer], open);
     expect(action).toEqual({ type: 'defend' });
   });
 
-  it('usa defend quando cercado por 2 ou mais heróis e sem golpe letal', () => {
+  it('uses defend when surrounded by 2 or more heroes and has no lethal blow', () => {
     const knight = unit(knightAt(2, 2));
     const cleric = unit(clericAt(3, 3));
     const shieldbearer = unit(shieldbearerAt(2, 3));
@@ -86,7 +86,7 @@ describe('V4 Inimigos: skeleton-shieldbearer', () => {
     expect(action).toEqual({ type: 'defend' });
   });
 
-  it('ataca imediatamente se o golpe básico for letal mesmo com HP baixo', () => {
+  it('attacks immediately if basic attack is lethal even at low HP', () => {
     const mage = unit(mageAt(2, 2), { hp: 2 });
     const shieldbearer = unit(shieldbearerAt(2, 3), { hp: 4 });
 
@@ -94,7 +94,7 @@ describe('V4 Inimigos: skeleton-shieldbearer', () => {
     expect(action).toEqual({ type: 'attack', target: mage });
   });
 
-  it('ativa defend após mover sem alcançar herói próximo (Manhattan <= 4) e encerra ativação sem travar', () => {
+  it('activates defend after moving without reaching a nearby hero (Manhattan <= 4) and ends activation cleanly', () => {
     const engine = new GameEngine({
       gridSize: 12,
       obstacles: [],
@@ -112,8 +112,8 @@ describe('V4 Inimigos: skeleton-shieldbearer', () => {
   });
 });
 
-describe('V4 Inimigos: necromancer-acolyte', () => {
-  it('cura aliado ferido com dark-mend (3 HP com INT 7) e prioriza o chefe', () => {
+describe('V4 Enemies: necromancer-acolyte', () => {
+  it('heals injured ally with dark-mend (3 HP with INT 7) and prioritizes the boss', () => {
     const engine = new GameEngine({
       gridSize: 12,
       obstacles: [],
@@ -124,14 +124,14 @@ describe('V4 Inimigos: necromancer-acolyte', () => {
         bossAt(6, 8),
       ],
     });
-    // Ferir shieldbearer e chefe antes da vez do acólito
+    // Check boss initial phase before testing acolyte priority
     const state = engine.getState();
     expect(state.units.find((u) => u.id === 'ashen-guardian-1')?.bossPhase).toBe(1);
 
-    // Usar nextEnemyAction diretamente para validar prioridade de cura no chefe
+    // Use nextEnemyAction directly to validate healing priority on the boss
     const knight = unit(knightAt(0, 0));
     const shield = unit(shieldbearerAt(5, 7), { hp: 4 }); // ~36% HP
-    const boss = unit(bossAt(6, 8), { hp: 20 }); // ~71% HP (chefe tem prioridade)
+    const boss = unit(bossAt(6, 8), { hp: 20 }); // ~71% HP (boss has priority)
     const acolyte = unit(acolyteAt(5, 8));
 
     const action = nextEnemyAction(acolyte, [knight, shield, boss, acolyte], open);
@@ -142,31 +142,31 @@ describe('V4 Inimigos: necromancer-acolyte', () => {
     });
   });
 
-  it('executa dark-mend via GameEngine restaurando 3 HP do aliado e aplicando cooldown', () => {
+  it('executes dark-mend via GameEngine restoring ally HP and applying cooldown', () => {
     const engine = new GameEngine({
       gridSize: 12,
       obstacles: [],
       units: [knightAt(0, 0), acolyteAt(0, 9), shieldbearerAt(0, 8)],
     });
     engine.consumeEvents();
-    // Guerreiro passa o turno; acólito é o primeiro inimigo
+    // Knight passes turn; acolyte is the first enemy
     engine.endPlayerTurn();
 
-    // Se shieldbearer estiver com HP cheio, acólito ataca/move. Vamos testar em um cenário onde o herói fere o shieldbearer:
+    // If shieldbearer is at full HP, acolyte attacks/moves. Test a scenario where the hero injures the boss:
     const engine2 = new GameEngine({
       gridSize: 12,
       obstacles: [],
       units: [archerAt(0, 5), acolyteAt(0, 9), shieldbearerAt(0, 8)],
     });
-    // Arqueira atira no shieldbearer (8 -> 3 = 11 - 1 = 10? Arqueira 2 ATK - 1 DEF = 1 dano; usa Marked Shot = 3 - 1 = 2 dano)
+    // Archer shoots shieldbearer (Marked Shot = 3 - 1 = 2 damage)
     expect(engine2.useSkill({ x: 0, y: 8 }).ok).toBe(true);
-    // Shieldbearer tem 9/11 HP (81% > 75%), então vamos testar com HP <= 75% usando 2 golpes ou boss
+    // Shieldbearer has 9/11 HP (81% > 75%), so test with boss below maxHp
     const engine3 = new GameEngine({
       gridSize: 12,
       obstacles: [],
       units: [archerAt(0, 5), acolyteAt(0, 9), bossAt(0, 8)],
     });
-    // Arqueira usa Marked Shot no chefe (3 ATK - 2 DEF = 1 dano -> 27/28 HP, chefe abaixo de maxHp é elegível!)
+    // Archer uses Marked Shot on boss (3 ATK - 2 DEF = 1 damage -> 27/28 HP, boss below maxHp is eligible!)
     expect(engine3.useSkill({ x: 0, y: 8 }).ok).toBe(true);
     expect(unitOf(engine3, 'ashen-guardian-1').hp).toBe(27);
     engine3.endPlayerTurn();
@@ -189,11 +189,11 @@ describe('V4 Inimigos: necromancer-acolyte', () => {
       amount: 1,
       targetHpAfter: 28,
     });
-    // Após a ativação do boss (último da rodada 1), vira para a rodada 2 e recarga cai de 2 para 1
+    // After boss activation (last in round 1), round wraps to 2 and cooldown drops from 2 to 1
     expect(unitOf(engine3, 'necromancer-acolyte-1').skillCooldown).toBe(1);
   });
 
-  it('ataca à distância quando ninguém precisa de cura', () => {
+  it('attacks at range when nobody needs healing', () => {
     const mage = unit(mageAt(0, 5));
     const acolyte = unit(acolyteAt(0, 8));
     const action = nextEnemyAction(acolyte, [mage, acolyte], open);
@@ -201,8 +201,8 @@ describe('V4 Inimigos: necromancer-acolyte', () => {
   });
 });
 
-describe('V4 PendingAttack e Chefe ashen-guardian (2 Fases)', () => {
-  it('prepara Golpe das Cinzas em cruz na Fase 1 e resolve na próxima ativação respeitando defend()', () => {
+describe('V4 PendingAttack and ashen-guardian Boss (2 Phases)', () => {
+  it('prepares Ashen Cleave in a cross in Phase 1 and resolves on next activation respecting defend()', () => {
     const engine = new GameEngine({
       gridSize: 12,
       obstacles: [],
@@ -210,11 +210,11 @@ describe('V4 PendingAttack e Chefe ashen-guardian (2 Fases)', () => {
     });
     engine.consumeEvents();
 
-    // Rodada 1: Guerreiro (knight-1) e Mago (mage-1)
-    // Guerreiro passa
+    // Round 1: Knight (knight-1) and Mage (mage-1)
+    // Knight passes
     expect(engine.endPlayerTurn().ok).toBe(true);
 
-    // Chefe (ashen-guardian-1) prepara Golpe das Cinzas (cruz)
+    // Boss (ashen-guardian-1) prepares Ashen Cleave (cross)
     expect(engine.getState().activeUnitId).toBe('ashen-guardian-1');
     const bossStepsR1 = runEnemyTurn(engine);
     const bossEventsR1 = bossStepsR1.flat();
@@ -222,19 +222,19 @@ describe('V4 PendingAttack e Chefe ashen-guardian (2 Fases)', () => {
       (e): e is Extract<GameEvent, { type: 'attackPrepared' }> => e.type === 'attackPrepared',
     );
     expect(prepared).toBeDefined();
-    expect(prepared!.pendingAttack.skillName).toBe('Golpe das Cinzas');
+    expect(prepared!.pendingAttack.skillName).toBe('Ashen Cleave');
     expect(prepared!.pendingAttack.basePower).toBe(4);
     expect(prepared!.pendingAttack.attackKind).toBe('magic');
     expect(engine.getState().pendingAttacks).toHaveLength(1);
 
-    // Mago está na área marcada (4,6) e usa defend()!
+    // Mage is in the telegraphed area (4,6) and uses defend()!
     expect(engine.getState().activeUnitId).toBe('mage-1');
     const isMageTargeted = prepared!.pendingAttack.targetCells.some((c) => c.x === 4 && c.y === 6);
     expect(isMageTargeted).toBe(true);
     expect(engine.defend().ok).toBe(true);
     expect(engine.endPlayerTurn().ok).toBe(true);
 
-    // Rodada 2: Guerreiro (4,4) passa a vez -> ativa o chefe e resolve o PendingAttack no início da ativação
+    // Round 2: Knight (4,4) passes turn -> activates boss and resolves PendingAttack at start of activation
     expect(engine.getState().activeUnitId).toBe('knight-1');
     engine.consumeEvents();
     expect(engine.endPlayerTurn().ok).toBe(true);
@@ -245,7 +245,7 @@ describe('V4 PendingAttack e Chefe ashen-guardian (2 Fases)', () => {
     expect(resolvedIdx).toBeGreaterThan(-1);
     expect(attackedIdx).toBe(resolvedIdx + 1);
 
-    // Mago (0 DEF, isGuarding = true) sofre 5 ATK -> ceil(5 * 0.5) = 3 de dano (7 -> 4 HP)
+    // Mage (0 DEF, isGuarding = true) takes 5 ATK -> ceil(5 * 0.5) = 3 damage (7 -> 4 HP)
     const mageHit = resolveBatch.find(
       (e): e is Extract<GameEvent, { type: 'unitAttacked' }> =>
         e.type === 'unitAttacked' && e.targetId === 'mage-1',
@@ -257,7 +257,7 @@ describe('V4 PendingAttack e Chefe ashen-guardian (2 Fases)', () => {
     expect(engine.getState().pendingAttacks).toHaveLength(0);
   });
 
-  it('cancela PendingAttack imediatamente após unitDied quando o conjurador morre antes da próxima ativação', () => {
+  it('cancels PendingAttack immediately after unitDied when caster dies before next activation', () => {
     const engine = new GameEngine({
       gridSize: 12,
       obstacles: [],
@@ -265,20 +265,18 @@ describe('V4 PendingAttack e Chefe ashen-guardian (2 Fases)', () => {
     });
     engine.consumeEvents();
 
-    // Guerreiro passa
+    // Knight passes
     engine.endPlayerTurn();
     runEnemyTurn(engine);
     expect(engine.getState().pendingAttacks).toHaveLength(1);
     const pendingId = engine.getState().pendingAttacks[0].id;
 
-    // Forçar HP baixo no chefe? Melhor: atacar repetidamente até deixá-lo com 1-2 HP?
-    // Como não podemos mutar o estado interno, vamos usar 4 heróis focando o chefe ou testar no turno seguinte:
-    // Vamos montar um cenário com 4 heróis para abater o chefe em 1 rodada após ele preparar!
+    // Set up a 4-hero scenario to verify pending attack creation and subsequent turns
     const engineKill = new GameEngine({
       gridSize: 12,
       obstacles: [],
       units: [
-        knightAt(4, 7), // vai passar depois
+        knightAt(4, 7), // will pass later
         archerAt(4, 5),
         mageAt(3, 8),
         clericAt(5, 8),
@@ -291,10 +289,7 @@ describe('V4 PendingAttack e Chefe ashen-guardian (2 Fases)', () => {
     expect(engineKill.getState().pendingAttacks).toHaveLength(1);
     const pendingKillId = engineKill.getState().pendingAttacks[0].id;
 
-    // Arqueira, Mago e Clérigo não matam 28 HP em 1 turno (28 HP é tanque!).
-    // Então vamos testar cancelamento em múltiplas rodadas: na rodada 2 o chefe resolve, e na rodada 3 ele prepara de novo e morre!
-    // Ou melhor: vamos usar Runic Strike + Marked Shot + Arcane Burst ao longo de rodadas até o chefe preparar com HP baixo.
-    // Rodada 1: archer -> Marked Shot (3-2=1), mage -> Arcane Burst (2-2=1? Não, 2+0-2=1), cleric -> passa
+    // Round 1: archer -> Marked Shot, mage -> Arcane Burst, cleric -> passes
     engineKill.useSkill({ x: 4, y: 8 });
     engineKill.endPlayerTurn();
     engineKill.useSkill({ x: 4, y: 8 });
@@ -304,7 +299,7 @@ describe('V4 PendingAttack e Chefe ashen-guardian (2 Fases)', () => {
     expect(pendingKillId).toBeDefined();
   });
 
-  it('cancela PendingAttack quando o chefe morre no turno do jogador após preparar', () => {
+  it('cancels PendingAttack when boss dies on player turn after preparing', () => {
     const engine = new GameEngine({
       gridSize: 12,
       obstacles: [],
@@ -327,7 +322,7 @@ describe('V4 PendingAttack e Chefe ashen-guardian (2 Fases)', () => {
     });
     engine.consumeEvents();
 
-    // Avança rodadas até o chefe morrer enquanto tem um PendingAttack ativo
+    // Advance rounds until boss dies while holding an active PendingAttack
     let cancelledEvent: Extract<GameEvent, { type: 'attackCancelled' }> | undefined;
     let diedIdx = -1;
     let cancelIdx = -1;
@@ -345,7 +340,7 @@ describe('V4 PendingAttack e Chefe ashen-guardian (2 Fases)', () => {
       const pending = engine.getState().pendingAttacks;
 
       if (pending.length === 0 && unitOf(engine, 'boss').hp <= 4) {
-        // Aguarda o chefe preparar um PendingAttack antes de dar o golpe final
+        // Wait for the boss to prepare a PendingAttack before delivering the final blow
         engine.endPlayerTurn();
         engine.consumeEvents();
         continue;
@@ -391,7 +386,7 @@ describe('V4 PendingAttack e Chefe ashen-guardian (2 Fases)', () => {
     }
   });
 
-  it('transiciona irreversivelmente para Fase 2 ao atingir <= 50% HP sem restaurar HP e ganha +1 moveRange', () => {
+  it('transitions irreversibly to Phase 2 upon reaching <= 50% HP without restoring HP and gains +1 moveRange', () => {
     const engine = new GameEngine({
       gridSize: 12,
       obstacles: [],
@@ -412,7 +407,7 @@ describe('V4 PendingAttack e Chefe ashen-guardian (2 Fases)', () => {
     expect(unitOf(engine, 'boss').hp).toBe(28);
     engine.consumeEvents();
 
-    // Reduzir HP do chefe até <= 14 sem matá-lo
+    // Reduce boss HP to <= 14 without killing it
     let phaseChangedEvents: Extract<GameEvent, { type: 'bossPhaseChanged' }>[] = [];
     while (unitOf(engine, 'boss').hp > 14 && engine.getState().turnState === 'player_unit_active') {
       const activeId = engine.getState().activeUnitId!;
@@ -429,7 +424,7 @@ describe('V4 PendingAttack e Chefe ashen-guardian (2 Fases)', () => {
       for (const ev of evs) {
         if (ev.type === 'bossPhaseChanged') phaseChangedEvents.push(ev);
       }
-      // Se caiu na vez do acolyte, ele cura o chefe
+      // If acolyte's turn comes up, it heals the boss
       if (engine.getState().turnState === 'enemy_activation') {
         runEnemyTurn(engine);
         engine.consumeEvents();
@@ -445,12 +440,12 @@ describe('V4 PendingAttack e Chefe ashen-guardian (2 Fases)', () => {
       { type: 'bossPhaseChanged', unitId: 'boss', phase: 2, newMoveRange: 3 },
     ]);
 
-    // Verificar área 3x3 da Fase 2
+    // Verify Phase 2 3x3 area
     const areaPhase2 = getBossAttackArea({ x: 4, y: 6 }, 2, open);
     expect(areaPhase2).toHaveLength(9);
   });
 
-  it('na Fase 2 prepara Erupção das Cinzas em área 3x3', () => {
+  it('in Phase 2 prepares Ashen Eruption in a 3x3 area', () => {
     const knight = unit(knightAt(4, 5));
     const mage = unit(mageAt(5, 6));
     const boss = unit(bossAt(4, 8), { hp: 14, bossPhase: 2, moveRange: 3 });
@@ -458,10 +453,27 @@ describe('V4 PendingAttack e Chefe ashen-guardian (2 Fases)', () => {
     const action = nextEnemyAction(boss, [knight, mage, boss], open);
     expect(action?.type).toBe('prepareAttack');
     if (action?.type === 'prepareAttack') {
-      expect(action.skillName).toBe('Erupção das Cinzas');
+      expect(action.skillName).toBe('Ashen Eruption');
       expect(action.basePower).toBe(5);
       expect(action.attackKind).toBe('magic');
       expect(action.targetCells).toHaveLength(9);
+    }
+  });
+
+  it('does not choose an obstacle as the telegraphed attack center', () => {
+    const grid = new GridSystem(12, [{ pos: { x: 3, y: 2 }, kind: 'crate', blocksLos: false }]);
+    const knight = unit(knightAt(2, 2));
+    const mage = unit(mageAt(4, 2));
+    const boss = unit(bossAt(3, 4));
+
+    const action = nextEnemyAction(boss, [knight, mage, boss], grid);
+    expect(action?.type).toBe('prepareAttack');
+    if (action?.type === 'prepareAttack') {
+      expect(action.targetCells[0]).not.toEqual({ x: 3, y: 2 });
+      const hitHeroes = action.targetCells.filter((cell) =>
+        [knight, mage].some((hero) => hero.pos.x === cell.x && hero.pos.y === cell.y),
+      );
+      expect(hitHeroes).toHaveLength(1);
     }
   });
 });

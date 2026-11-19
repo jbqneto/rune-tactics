@@ -1,8 +1,8 @@
 import type { UnitState } from '../shared/types';
 
 /**
- * Encontra o inimigo vivo mais próximo pela distância Manhattan no grid.
- * Em caso de empate, desempata pela ordem em `turnOrder` (ou `units` se omitido).
+ * Finds the nearest living enemy by Manhattan grid distance.
+ * Ties are broken by order in `turnOrder` (or `units` if omitted).
  */
 export function findNearestLivingEnemy(
   unit: Pick<UnitState, 'pos'>,
@@ -39,7 +39,7 @@ export function findNearestLivingEnemy(
   return best;
 }
 
-/** Calcula o ângulo yaw no plano XZ do mundo 3D (independente da câmera). */
+/** Computes the yaw angle in the 3D world XZ plane (camera-independent). */
 export function computeWorldYaw(
   from: { x: number; z: number },
   to: { x: number; z: number }
@@ -47,7 +47,7 @@ export function computeWorldYaw(
   return Math.atan2(to.x - from.x, to.z - from.z);
 }
 
-/** Retorna o menor arco angular entre `from` e `to`, normalizado em `[-Math.PI, Math.PI]`. */
+/** Returns the shortest angular arc between `from` and `to`, normalized to `[-Math.PI, Math.PI]`. */
 export function shortestAngleDelta(from: number, to: number): number {
   let delta = (to - from) % (Math.PI * 2);
   if (delta > Math.PI) delta -= Math.PI * 2;

@@ -1,281 +1,281 @@
-# Direção de arte
+# Art Direction
 
-Este documento define a aparência do Rune Tactics a partir da V3 visual. Ele descreve o alvo; o código em `src/rendering/`, `src/ui/` e `src/style.css` ainda está no visual anterior. As medidas e formatos de cada asset estão em `visual-asset-specification.md`, e a interface em `ui-design-system.md`.
+This document defines the visual look of Rune Tactics starting from the V3 visual pass. It describes the target; the code in `src/rendering/`, `src/ui/`, and `src/style.css` is still on the previous look at the time of writing. Dimensions and formats for each asset are in `visual-asset-specification.md`, and UI specifications are in `ui-design-system.md`.
 
-## Escopo
+## Scope
 
-A referência é `references/ref-v3.png`. Dela vêm o clima, a paleta, a luz e a organização da interface. Dela **não** vêm mecânicas: terreno em vários níveis, pontes, baús, relíquias, objetivos, níveis de herói, chefes e efeitos de célula continuam fora do jogo.
+The visual reference is `references/ref-v3.png`. Mood, palette, lighting, and UI organization come from it. Mechanics **do not**: multi-level terrain, bridges, chests, relics, objectives, hero levels, bosses, and cell effects remain out of scope for V3.
 
-Consequências práticas:
+Practical consequences:
 
-- O tabuleiro continua plano, com 12×12 células. Nenhum elemento de arte sugere altura jogável dentro da grade.
-- Escadas, pontes, cachoeiras, altar e estandartes podem existir só como cenário, fora das células.
-- Nenhum inimigo é desenhado como chefe: não há unidade maior que o Armored Skeleton.
+- The board remains flat, 12×12 cells. No art element implies playable elevation inside the grid.
+- Stairs, bridges, waterfalls, an altar, and banners may exist only as outer scenery, outside the grid cells.
+- No enemy is designed as a boss: no unit is larger than the Armored Skeleton.
 
-## Pilares
+## Pillars
 
-1. **Leitura tática antes de beleza.** A qualquer ângulo da câmera, o jogador identifica em um relance o time, a classe e a unidade ativa. Se um detalhe bonito atrapalha isso, ele sai.
-2. **Miniatura de mesa.** O campo de batalha parece uma maquete sobre uma laje flutuante: formas robustas, proporções de boneco, poucos materiais.
-3. **Facetas, não texturas.** A forma é dada por planos chapados que pegam a luz. Textura só no piso e nos muros.
-4. **Paleta curta.** Pedra fria, luz quente de tocha, e uma cor forte por classe. Vermelho pertence aos inimigos.
-5. **Um só conjunto.** Modelos, retratos, ícones e interface usam as mesmas cores e as mesmas formas-assinatura.
+1. **Tactical readability before beauty.** From any camera angle, the player identifies team, class, and active unit at a glance. If a pretty detail gets in the way of that, it goes.
+2. **Tabletop miniature.** The battlefield feels like a diorama on a floating stone slab: chunky forms, toy-like proportions, few materials.
+3. **Facets, not textures.** Form comes from flat planes catching light. Textures belong only on floor tiles and walls.
+4. **Tight palette.** Cool stone, warm torchlight, and one strong color per class. Red belongs to enemies.
+5. **One cohesive set.** Models, portraits, icons, and UI share the exact same colors and signature silhouettes.
 
-## Estilo visual
+## Visual Style
 
-- **Gênero:** RPG tático medieval de fantasia, low-poly, visto de cima em três quartos com câmera ortográfica.
-- **Low-poly de verdade:** poucas faces, grandes e legíveis. Sombreamento chapado em todas as faces. Sem suavização, sem normal map, sem microdetalhe.
-- **Forma antes de detalhe:** cada objeto se resolve com três a oito volumes simples. Um detalhe só entra se muda a silhueta.
-- **Pequenas imperfeições:** vértices levemente deslocados e variação sutil de tom entre faces vizinhas, para a pedra e a madeira não parecerem plástico.
-- **Sem realismo:** nada de fotorrealismo, ruído fino, gradientes suaves em superfícies, texto embutido em textura ou sprites 2D no lugar de unidades 3D.
+- **Genre:** Stylized low-poly medieval fantasy tactical RPG, viewed from a three-quarter top-down orthographic camera.
+- **True low-poly:** low polycount, large readable faces. Flat shading on every face. No smooth shading, no normal maps, no micro-detail.
+- **Form before detail:** each object resolves into three to eight simple volumes. A detail only belongs if it changes the silhouette.
+- **Subtle imperfections:** slightly jittered vertices and subtle shade variation between neighboring faces so stone and wood never look like plastic.
+- **No realism:** no photorealism, fine noise, smooth surface gradients, text baked into textures, or 2D sprites replacing 3D units.
 
-## Paleta
+## Palette
 
-### Ambiente
+### Environment
 
-| Uso | Cor | Hex |
+| Usage | Color | Hex |
 |---|---|---|
-| Fundo e névoa | azul-noite | `#0f172a` |
-| Pedra do piso, clara | ardósia | `#64748b` |
-| Pedra do piso, escura | ardósia funda | `#475569` |
-| Muros e pilares | ardósia azulada | `#55627a` |
-| Laje e corte lateral | pedra escura | `#334155` |
-| Madeira de caixote e barril | castanho | `#8b5a2b` |
-| Ferragens | ferro escuro | `#3f3f46` |
-| Musgo e folhagem | verde fechado | `#2d5a3c` |
-| Chama e luz de tocha | âmbar | `#f59e0b`, `#fb923c` |
-| Estandarte aliado | azul real | `#2563eb` |
-| Estandarte inimigo | carmim | `#b91c1c` |
+| Background and fog | midnight blue | `#0f172a` |
+| Floor stone, light | slate | `#64748b` |
+| Floor stone, dark | deep slate | `#475569` |
+| Walls and pillars | blue-slate | `#55627a` |
+| Slab and side cross-section | dark stone | `#334155` |
+| Crate and barrel wood | brown | `#8b5a2b` |
+| Metal fittings | dark iron | `#3f3f46` |
+| Moss and foliage | muted forest green | `#2d5a3c` |
+| Flame and torchlight | amber | `#f59e0b`, `#fb923c` |
+| Allied banner | royal blue | `#2563eb` |
+| Enemy banner | crimson | `#b91c1c` |
 
-### Heróis
+### Heroes
 
-Cada herói tem uma cor de classe, usada em pelo menos 40% da superfície visível do modelo, no retrato e no acento do card.
+Each hero has a class color used on at least 40% of the model's visible surface, in its portrait, and on its card accent.
 
-| Classe | Cor de classe | Secundária | Acento |
+| Class | Class Color | Secondary | Accent |
 |---|---|---|---|
-| Guerreiro | azul real `#3b82f6` | aço `#cbd5e1` | ouro velho `#cba662` |
-| Arqueira | verde floresta `#22c55e` | couro `#8b5a2b` | madeira clara `#d6a86a` |
-| Mago | púrpura `#a855f7` | índigo `#4338ca` | cristal ciano `#22d3ee` |
-| Clérigo | marfim `#f1f5f9` | ouro `#eab308` | azul celeste `#7dd3fc` |
+| Knight | royal blue `#3b82f6` | steel `#cbd5e1` | antique gold `#cba662` |
+| Archer | forest green `#22c55e` | leather `#8b5a2b` | light wood `#d6a86a` |
+| Mage | purple `#a855f7` | indigo `#4338ca` | cyan crystal `#22d3ee` |
+| Cleric | ivory `#f1f5f9` | gold `#eab308` | sky blue `#7dd3fc` |
 
-### Inimigos
+### Enemies
 
-Todos os inimigos compartilham osso e ferro, dessaturados, com carmim como única cor forte.
+All enemies share desaturated bone and iron, with crimson as the sole strong accent color.
 
-| Tipo | Base | Secundária | Acento |
+| Type | Base | Secondary | Accent |
 |---|---|---|---|
-| Melee Skeleton | osso `#e5e7eb` | ferro `#57534e` | carmim `#ef4444` |
-| Skeleton Archer | osso `#e5e7eb` | pano escuro `#44403c` | carmim `#ef4444` |
-| Armored Skeleton | ferro `#57534e` | osso `#d6d3d1` | carmim `#dc2626`, bronze `#a16207` |
-| Goblin Scout | pele oliva `#6b8e23` | couro escuro `#422006` | lenço carmim `#ef4444` |
-| Cultist Mage | manto vinho `#4a0d1f` | preto `#18181b` | brilho magenta `#f43f5e` |
+| Melee Skeleton | bone `#e5e7eb` | iron `#57534e` | crimson `#ef4444` |
+| Skeleton Archer | bone `#e5e7eb` | dark cloth `#44403c` | crimson `#ef4444` |
+| Armored Skeleton | iron `#57534e` | bone `#d6d3d1` | crimson `#dc2626`, bronze `#a16207` |
+| Goblin Scout | olive skin `#6b8e23` | dark leather `#422006` | crimson scarf `#ef4444` |
+| Cultist Mage | wine robe `#4a0d1f` | black `#18181b` | magenta glow `#f43f5e` |
 
-O goblin é oliva fosco, nunca o verde vivo da Arqueira. O cultista é vinho e preto, nunca o púrpura do Mago.
+The goblin is matte olive, never the Archer's bright green. The cultist is wine and black, never the Mage's purple.
 
-### Destaques no tabuleiro
+### Board Highlights
 
-| Significado | Cor | Hex |
+| Meaning | Color | Hex |
 |---|---|---|
-| Células alcançáveis | azul | `#3b82f6` |
-| Caminho e seleção | amarelo | `#facc15` |
-| Destino sob o cursor | verde | `#22c55e` |
-| Alcance de ataque | vermelho suave | `#f87171` |
-| Alvo atacável | vermelho | `#ef4444` |
-| Alcance e área de habilidade | púrpura | `#a855f7` |
-| Alvo de cura | verde claro | `#4ade80` |
+| Reachable cells | blue | `#3b82f6` |
+| Path and selection | yellow | `#facc15` |
+| Destination under cursor | green | `#22c55e` |
+| Attack range | soft red | `#f87171` |
+| Attackable target | red | `#ef4444` |
+| Skill range and area | purple | `#a855f7` |
+| Heal target | light green | `#4ade80` |
 
-Essas cores não são usadas em modelos nem em cenário dentro da grade, para o destaque nunca se confundir com um objeto.
+These colors are never used on models or in-grid scenery so highlights never blend into objects.
 
-## Tratamento visual das equipes
+## Visual Team Treatment
 
-O time é lido por quatro sinais redundantes, para funcionar mesmo com a câmera girada e para quem não distingue bem cores:
+Team affiliation is communicated through four redundant cues so it works even with a rotated camera and for color-blind players:
 
-| Sinal | Aliados | Inimigos |
+| Cue | Allies | Enemies |
 |---|---|---|
-| Temperatura | cores frias e de joia, saturadas | osso e ferro dessaturados, com carmim |
-| Anel na base | azul `#3b82f6`; dourado `#facc15` quando ativo | vermelho `#ef4444` |
-| Barra de HP | verde | vermelha |
-| Moldura do retrato | azul ou dourada | vermelha |
+| Temperature | cool, saturated jewel tones | desaturated bone and iron, with crimson |
+| Base ring | blue `#3b82f6`; gold `#facc15` when active | red `#ef4444` |
+| HP bar | green | red |
+| Portrait frame | blue or gold | red |
 
-A unidade com a ativação aberta aparece com opacidade total e o anel dourado ou vermelho mais intenso. As demais vivas ficam a 75%.
+The currently acting unit appears at full opacity with a brighter gold or red ring. All other living units render at 75% opacity.
 
-## Proporções dos personagens
+## Character Proportions
 
-- **Boneco de três cabeças.** A cabeça ocupa cerca de um terço da altura. Mãos e armas são exageradas em cerca de 30%.
-- **Altura de referência:** 1,05 unidade para um herói, em uma célula de 1,0. Cada unidade cabe em um cilindro de 0,6 de diâmetro, para nunca invadir a célula vizinha.
-- **Pés firmes:** base larga e pernas curtas. Nada de membros finos que somem a distância.
-- **Arma sempre visível de cima:** ela fica ao lado ou acima do corpo, nunca escondida atrás dele.
+- **Three-head figurine.** The head accounts for roughly one third of total height. Hands and weapons are exaggerated by ~30%.
+- **Reference height:** 1.05 units for a hero on a 1.0 cell. Each unit fits inside a 0.6-diameter cylinder so it never spills into neighboring cells.
+- **Solid footing:** wide base and short legs. No spindly limbs that vanish at distance.
+- **Weapon always visible from above:** held beside or above the body, never hidden behind it.
 
-| Unidade | Altura | Largura | Postura |
+| Unit | Height | Width | Posture |
 |---|---|---|---|
-| Guerreiro | 1,05 | larga | ereto, ombros largos |
-| Arqueira | 1,05 | estreita | leve, um pé à frente |
-| Mago | 1,10 com o chapéu | média, em cone | ereto, cajado ao lado |
-| Clérigo | 0,95 | larga | atarracado |
-| Goblin Scout | 0,80 | estreita | curvado para a frente |
-| Melee Skeleton | 1,00 | estreita | levemente curvado |
-| Skeleton Archer | 1,00 | estreita | ereto |
-| Armored Skeleton | 1,25 | muito larga | pesado, ombreiras |
-| Cultist Mage | 1,05 | média, em cone | curvado, braços recolhidos |
+| Knight | 1.05 | wide | upright, broad shoulders |
+| Archer | 1.05 | narrow | nimble, one foot forward |
+| Mage | 1.10 with hat | medium, conical | upright, staff at side |
+| Cleric | 0.95 | wide | stocky |
+| Goblin Scout | 0.80 | narrow | hunched forward |
+| Melee Skeleton | 1.00 | narrow | slightly hunched |
+| Skeleton Archer | 1.00 | narrow | upright |
+| Armored Skeleton | 1.25 | very wide | heavy, large pauldrons |
+| Cultist Mage | 1.05 | medium, conical | hunched, arms tucked in |
 
-## Formas e silhuetas
+## Shapes and Silhouettes
 
-Cada unidade tem uma forma-assinatura, reconhecível em preto chapado e repetida no retrato.
+Each unit has a signature silhouette, recognizable in flat black and mirrored in its portrait.
 
-| Unidade | Forma-assinatura | Arma | Detalhe que não pode faltar |
+| Unit | Signature Shape | Weapon | Must-Have Detail |
 |---|---|---|---|
-| Guerreiro | trapézio de ombros largos com escudo em pipa | espada reta | crista azul no elmo e viseira escura |
-| Arqueira | capuz pontudo e arco longo na vertical | arco e aljava em diagonal nas costas | capuz verde cobrindo os ombros |
-| Mago | cone alto: chapéu ou capuz pontudo e manto até o chão | cajado mais alto que a cabeça | cristal ciano aceso na ponta do cajado |
-| Clérigo | bloco baixo e largo, com tabardo | maça ou martelo curto | símbolo dourado no peito e capuz marfim |
-| Goblin Scout | corpo pequeno, curvado, com orelhas pontudas na horizontal | adaga | lenço carmim no pescoço |
-| Melee Skeleton | corpo magro com costelas aparentes | espada curta e escudo redondo | órbitas escuras e escudo com faixa carmim |
-| Skeleton Archer | corpo magro, sem escudo | arco | capuz de pano rasgado |
-| Armored Skeleton | o maior volume do tabuleiro: ombreiras e elmo com chifres | machado de duas mãos | placas de ferro com rebites de bronze |
-| Cultist Mage | cone com capuz fechado, sem rosto | orbe flutuando à frente das mãos | dois olhos acesos em magenta dentro do capuz |
+| Knight | broad-shouldered trapezoid with kite shield | straight sword | blue crest on helm and dark visor |
+| Archer | pointed hood and vertical longbow | bow and diagonal quiver on back | green hood draped over shoulders |
+| Mage | tall cone: pointed hat/hood and floor-length robe | staff taller than head | lit cyan crystal atop the staff |
+| Cleric | short, wide block with tabard | mace or short hammer | gold chest emblem and ivory hood |
+| Goblin Scout | small hunched body with horizontal pointed ears | dagger | crimson scarf around neck |
+| Melee Skeleton | thin torso with visible ribs | short sword and round shield | dark eye sockets and crimson-striped shield |
+| Skeleton Archer | thin torso, no shield | bow | tattered cloth hood |
+| Armored Skeleton | largest bulk on the board: pauldrons and horned helm | two-handed axe | iron plates with bronze rivets |
+| Cultist Mage | closed-hood cone, faceless | orb floating before hands | two glowing magenta eyes inside the hood |
 
-Pares que precisam se distinguir de longe:
+Pairs that must read clearly apart from afar:
 
-- **Mago e Cultist Mage:** o Mago é claro, ereto, com cajado alto; o cultista é escuro, curvado, sem cajado.
-- **Arqueira e Skeleton Archer:** capuz cheio e verde contra corpo magro e osso.
-- **Guerreiro e Armored Skeleton:** escudo e azul contra chifres, ferro e tamanho maior.
-- **Clérigo e Guerreiro:** o Clérigo é mais baixo, marfim, sem escudo.
+- **Mage and Cultist Mage:** Mage is bright, upright, with a tall staff; Cultist is dark, hunched, staffless.
+- **Archer and Skeleton Archer:** full green hood vs. thin bone silhouette.
+- **Knight and Armored Skeleton:** shield and blue vs. horns, iron, and larger bulk.
+- **Cleric and Knight:** Cleric is shorter, ivory, shieldless.
 
-## Cenário
+## Scenery
 
-- **Laje flutuante.** O tabuleiro fica sobre um bloco de pedra com a lateral visível, como uma maquete. O corte mostra camadas de pedra em dois tons.
-- **Pátio de ruínas.** Piso de lajotas irregulares, muros quebrados, arcos e pilares. Musgo nas juntas e no pé dos muros.
-- **Obstáculos lidos pela altura.** Parede e pilar são altos, 1,2 ou mais, e bloqueiam a visão. Caixote e barril são baixos, 0,7 ou menos, e não bloqueiam. A altura é a pista visual da regra, e isso não pode ser quebrado por decoração.
-- **Moldura fora da grade.** Estandartes, tochas, ruínas altas e vegetação ficam fora das 144 células. Como a câmera gira 360°, toda peça alta do perímetro é escondida quando fica entre a câmera e o tabuleiro.
-- **Três mapas, um só kit.** Os três traçados usam as mesmas peças. A diferença entre eles está no arranjo, em um tom de pedra e na cor dos estandartes.
+- **Floating slab.** The board rests on a stone block with a visible cross-section, like a tabletop diorama. The cut shows stone strata in two tones.
+- **Ruined courtyard.** Irregular flagstones, broken walls, arches, and pillars. Moss in crevices and along wall bases.
+- **Obstacles readable by height.** Walls and pillars are tall (1.2 or more) and block sight. Crates and barrels are low (0.7 or less) and do not block sight. Height visually encodes the rule and must never be broken by decoration.
+- **Out-of-grid framing.** Banners, torches, tall ruins, and foliage sit outside the 144 cells. Because the camera orbits 360°, any tall perimeter piece hides when positioned between the camera and the board.
+- **Three maps, one kit.** All three layouts use the same prop kit. Differences come from arrangement, stone tint, and banner colors.
 
-## Iluminação
+## Lighting
 
-O clima é de noite clara em ruínas: luz fria de cima, calor das tochas embaixo.
+Mood is a clear moonlit night in ancient ruins: cool light from above, warm torchlight below.
 
-| Luz | Papel | Cor | Observação |
+| Light | Role | Color | Notes |
 |---|---|---|---|
-| Direcional principal | luar, define os planos e projeta sombra | branco frio `#eef4ff` | alta, de lado; sombra suave |
-| Ambiente e hemisférica | preenchimento | azul acinzentado `#9fb4d4` | nenhuma face fica preta |
-| Tochas, quatro pontos | calor e foco nos cantos | âmbar `#f59e0b` | oscilação leve, nunca pulsante |
-| Emissivos | magia e olhos | por classe | pequenos, pontuais |
+| Primary directional | moonlight, defines planes and casts shadows | cool white `#eef4ff` | high, angled from side; soft shadow |
+| Ambient and hemisphere | fill | slate blue `#9fb4d4` | no face goes pure black |
+| Torches, four point lights | warmth and corner accents | amber `#f59e0b` | subtle flicker, never pulsing |
+| Emissives | magic and eyes | per class | small, localized |
 
-Regras:
+Rules:
 
-- **Contraste quente e frio.** Toda face lê como iluminada pelo luar ou aquecida por tocha. É isso que dá volume às facetas.
-- **Legível em qualquer ângulo.** A câmera gira, então o preenchimento precisa manter visível o lado oposto à luz principal.
-- **Sombra como âncora.** Toda unidade projeta sombra no piso. Sem sombra, o boneco parece flutuar.
-- **Névoa só na distância.** Ela esconde a borda do mundo, nunca o tabuleiro.
-- **Cores fiéis.** Mapeamento de tom neutro, sem estouro de brilho. O brilho de magia vem de materiais emissivos, sem pós-processamento pesado.
+- **Warm/cool contrast.** Every face reads as lit by moonlight or warmed by torchlight. This gives facets volume.
+- **Readable from every angle.** The camera orbits, so fill lighting must keep the shadowed side legible.
+- **Shadows as anchors.** Every unit casts a shadow onto the floor. Without shadows, figurines appear to float.
+- **Distance fog only.** Fog hides the edge of the world, never the board.
+- **True colors.** Neutral tone mapping, no blown-out highlights. Magic glow comes from emissive materials without heavy post-processing.
 
-## Materiais
+## Materials
 
-O material padrão é `MeshStandardMaterial` com `flatShading: true`.
+Standard material is `MeshStandardMaterial` with `flatShading: true`.
 
-| Superfície | Rugosidade | Metal | Textura | Emissivo |
+| Surface | Roughness | Metalness | Texture | Emissive |
 |---|---|---|---|---|
-| Pano, couro, pele | 0,85 a 0,95 | 0 | não | não |
-| Osso | 0,75 | 0 | não | não |
-| Madeira | 0,85 | 0 | não | não |
-| Pedra de muro e pilar | 0,90 | 0 | `stone-wall.png` | não |
-| Piso | 0,85 a 0,90 | 0,05 | `stone-floor.png` | não |
-| Aço e ferro | 0,40 a 0,55 | 0,45 a 0,60 | não | não |
-| Ouro e bronze | 0,45 | 0,60 | não | não |
-| Cristal, orbe, olhos | 0,30 | 0 | não | sim, intensidade 1,0 a 2,0 |
-| Chama | — | — | não | cor plena, sem iluminação |
+| Cloth, leather, skin | 0.85 to 0.95 | 0 | no | no |
+| Bone | 0.75 | 0 | no | no |
+| Wood | 0.85 | 0 | no | no |
+| Wall and pillar stone | 0.90 | 0 | `stone-wall.png` | no |
+| Floor | 0.85 to 0.90 | 0.05 | `stone-floor.png` | no |
+| Steel and iron | 0.40 to 0.55 | 0.45 to 0.60 | no | no |
+| Gold and bronze | 0.45 | 0.60 | no | no |
+| Crystal, orb, eyes | 0.30 | 0 | no | yes, intensity 1.0 to 2.0 |
+| Flame | — | — | no | full color, unlit |
 
-Regras:
+Rules:
 
-- **Sombreamento chapado em tudo** que é personagem ou objeto. O piso também, apesar da textura.
-- **Cor por material, não por textura.** Personagens não usam textura pintada. Um modelo importado pode trazer um atlas de cores chapadas, desde que sem sombra pintada.
-- **Variação de tom por face** de até 4% de luminosidade em pedra, madeira e pano, para quebrar a uniformidade. Sem variação em metal e em cor de classe.
-- **Emissivo só com significado:** cristal do Mago, olhos e orbe do cultista, símbolo do Clérigo ao curar, chamas, efeitos de habilidade.
-- **Sem transparência em modelos,** exceto a regra de 75% das unidades inativas e os efeitos.
-- **Texturas** são só duas, tileáveis, sem sombra pintada e com iluminação uniforme.
+- **Flat shading on everything** that is a character or prop, including the floor despite its texture.
+- **Color by material, not texture.** Characters do not use painted textures. Imported models may use a flat-color palette atlas provided it has no baked shadows.
+- **Per-face shade variation** of up to 4% lightness on stone, wood, and cloth to break uniformity. No variation on metal or class colors.
+- **Meaningful emissives only:** Mage crystal, Cultist eyes and orb, Cleric emblem when healing, flames, skill VFX.
+- **No model transparency** except the 75% inactive-unit rule and VFX.
+- **Only two textures**, tileable, with uniform diffuse lighting and no baked shadows.
 
-## Tipografia
+## Typography
 
-| Papel | Família | Uso |
+| Role | Family | Usage |
 |---|---|---|
-| Título e destaque | Cinzel, com serifa | nome do jogo, nome do mapa, nome da unidade, resultado da batalha |
-| Interface | Inter, sem serifa | rótulos, botões, números, texto corrido |
+| Display and titles | Cinzel, serif | game title, map name, unit name, battle result |
+| Interface | Inter, sans-serif | labels, buttons, numbers, body text |
 
-- As fontes são servidas pelo próprio projeto, com a pilha do sistema como reserva. Nenhuma requisição externa em tempo de jogo.
-- Números de HP, dano e recarga usam algarismos tabulares, para não dançarem ao mudar.
-- Títulos em caixa alta com espaçamento largo. Texto de interface em caixa normal.
-- Nenhum texto com menos de 11 px. Nenhum texto dentro de imagem.
+- Fonts are self-hosted by the project, with system stacks as fallback. Zero external runtime font requests.
+- HP, damage, and cooldown numbers use tabular numerals so digits never jitter when updating.
+- Titles in uppercase with wide tracking. UI copy in sentence case.
+- No text smaller than 11 px. No text baked inside images.
 
-## Estilo da interface
+## Interface Style
 
-- **Painéis de pedra escura e metal.** Fundo azul-noite quase opaco, borda fina em ouro velho, cantos pouco arredondados. Lembram placas de ferro e madeira escura, sem textura fotográfica.
-- **A interface emoldura, não cobre.** Os painéis ficam nas bordas. O centro da tela é do tabuleiro.
-- **Cor com função.** Azul para o jogador e para movimento, vermelho para inimigos e ataque, púrpura para habilidade, dourado para a unidade ativa e para a ação principal.
-- **Retratos como identidade.** Toda menção a uma unidade vem com o retrato dela.
-- **Movimento discreto.** Transições curtas, sem quicar e sem brilho pulsando sem motivo.
+- **Dark stone and metal panels.** Near-opaque midnight blue background, thin antique-gold border, subtly rounded corners. Evokes iron plates and dark wood without photographic textures.
+- **The UI frames, never covers.** Panels hug screen edges. The center of the screen belongs to the board.
+- **Color with function.** Blue for player and movement, red for enemies and attack, purple for skills, gold for the active unit and primary action.
+- **Portraits as identity.** Every reference to a unit includes its portrait.
+- **Restrained motion.** Short transitions, no bouncing, no gratuitous pulsing glows.
 
-## Ícones
+## Icons
 
-- **Uma só família.** Todos os ícones de ação e de habilidade têm o mesmo tratamento. Hoje há ícones pintados e ícones vetoriais chapados misturados; a V3 unifica.
-- **Silhueta única e centrada,** legível a 24 px, ocupando cerca de 70% do quadro.
-- **Dois tons mais um acento.** A cor do acento segue a função: azul para mover, vermelho para atacar, a cor da classe para a habilidade, cinza para desfazer, dourado para encerrar o turno.
-- **Sem texto, sem moldura e sem fundo próprio.** A moldura é do botão.
-- **Mesmo ângulo e mesma luz** em todos: de frente, luz de cima à esquerda.
-- **Vocabulário:** bota para mover, espada para atacar, seta em curva para desfazer, ampulheta para encerrar o turno, e o gesto de cada habilidade (lâmina com runa, flecha com mira, explosão em cruz, luz com cruz).
+- **Single family.** All action and skill icons share the same visual treatment. Currently painted PNGs and flat SVGs are mixed; V3 unifies them.
+- **Single centered silhouette,** legible at 24 px, occupying ~70% of the frame.
+- **Two tones plus one accent.** Accent color follows function: blue for move, red for attack, class color for skill, grey for undo, gold for end turn.
+- **No text, no frame, no own background.** The button provides the frame.
+- **Same angle and lighting** on all icons: front-facing, top-left lighting.
+- **Visual vocabulary:** boot for move, sword for attack, curved arrow for undo, hourglass for end turn, and each skill's gesture (runed blade, aimed arrow, cross burst, healing light cross).
 
-## Retratos
+## Portraits
 
-- Busto em três quartos, olhando para o centro da tela.
-- Mesma luz dos modelos: principal fria de um lado, contraluz quente do outro.
-- Fundo ardósia escuro e liso, sem cenário.
-- A forma-assinatura e a cor de classe aparecem inteiras no quadro.
-- Mesmo estilo low-poly estilizado dos modelos. Os três retratos que hoje são provisórios (Clérigo, Goblin Scout e Cultist Mage) são refeitos nesse padrão.
+- Three-quarter bust facing toward screen center.
+- Same lighting as models: cool key light on one side, warm rim light on the other.
+- Flat dark slate background, no scenery.
+- Signature silhouette and class color appear clearly in frame.
+- Same stylized low-poly look as the 3D models. The three placeholder portraits (Cleric, Goblin Scout, and Cultist Mage) are redone to match.
 
-## Animação
+## Animation
 
-| Regra | Valor |
+| Rule | Value |
 |---|---|
-| Passo de movimento | 0,12 s por célula, com leve salto |
-| Golpe corpo a corpo | 0,34 s: recuo, avanço, retorno |
-| Disparo | 0,34 s, com o impacto perto de 60% do tempo |
-| Habilidade | 0,3 a 0,6 s, com o efeito no impacto |
-| Reação a dano | 0,15 s: clarão branco e pequeno recuo |
-| Morte | 0,3 a 0,5 s |
-| Giro de orientação | pelo menor arco, em cerca de 0,2 s |
+| Move step | 0.12 s per cell, with slight hop |
+| Melee strike | 0.34 s: wind-up, lunge, recovery |
+| Ranged shot | 0.34 s, with impact around 60% |
+| Skill | 0.3 to 0.6 s, with VFX at impact |
+| Hit reaction | 0.15 s: white flash and brief recoil |
+| Death | 0.3 to 0.5 s |
+| Facing rotation | shortest arc, ~0.2 s |
 
-- **Antecipação e peso.** Todo golpe tem um recuo curto antes e um assentamento depois.
-- **Uma ação por vez.** As animações de combate entram em fila; os controles ficam travados enquanto ela toca.
-- **Nada demora.** Nenhuma ação isolada passa de 1,2 s. O jogo é tático, e o jogador não espera animação.
-- **Repouso vivo, mas discreto.** Respiração de baixa amplitude em todas as unidades; um pouco mais marcada na ativa.
-- **O dano aparece no impacto,** nunca antes: barra de HP, clarão e número caem juntos.
-- **Morte por time.** Aliado cai e permanece deitado no chão. Inimigo cai, encolhe e desaparece.
-- **Sem tremor de câmera** e sem câmera lenta.
-- **Movimento reduzido.** Com a preferência do sistema ativa, saltos e clarões são atenuados, sem mudar a duração das ações.
+- **Anticipation and weight.** Every strike has a short wind-up before and settle after.
+- **One action at a time.** Combat animations queue sequentially; input locks while playing.
+- **Never sluggish.** No single action exceeds 1.2 s. It's a tactical game; players shouldn't wait on animations.
+- **Subtle living idle.** Low-amplitude breathing on all units; slightly stronger on the active unit.
+- **Damage lands on impact,** never earlier: HP bar, flash, and floating number trigger together.
+- **Death by team.** Allies fall and remain lying on the ground. Enemies fall, shrink, and vanish.
+- **No camera shake** and no slow motion.
+- **Reduced motion.** With system preference enabled, hops and flashes are toned down without changing action durations.
 
-## Efeitos
+## Effects
 
-- Formas geométricas simples: anéis, estilhaços, esferas, cruzes. Sem partículas fotográficas.
-- A cor do efeito é a da classe ou a da função: ciano e púrpura para o Mago, verde para a Arqueira, azul claro para o Guerreiro, verde e dourado para a cura, vermelho para ataques inimigos.
-- Todo efeito some em menos de 0,6 s e não deixa resíduo no tabuleiro.
+- Simple geometric shapes: rings, shards, spheres, crosses. No photographic particles.
+- Effect color matches class or function: cyan and purple for Mage, green for Archer, light blue for Knight, green and gold for healing, red for enemy attacks.
+- Every effect disappears in under 0.6 s and leaves zero residue on the board.
 
-## Consistência entre assets
+## Asset Consistency Checklist
 
-Um asset novo só entra se passar em todos os itens:
+A new asset only ships if it passes every item:
 
-- [ ] Usa só cores das tabelas deste documento.
-- [ ] A silhueta em preto chapado identifica a unidade ou o objeto.
-- [ ] Lê bem a 45° e com a câmera girada para os outros três lados.
-- [ ] Tem a mesma densidade de faces e o mesmo nível de detalhe dos vizinhos.
-- [ ] Usa sombreamento chapado e os valores de material da tabela.
-- [ ] Não traz textura com sombra pintada, texto ou marca.
-- [ ] Modelo, retrato e ícone da mesma unidade mostram a mesma forma-assinatura e a mesma cor.
-- [ ] Não sugere uma mecânica que o jogo não tem.
-- [ ] Segue `visual-asset-specification.md` e está registrado em `asset-generation.md`, com origem e licença.
+- [ ] Uses only colors from the tables in this document.
+- [ ] Solid black silhouette clearly identifies the unit or prop.
+- [ ] Reads well at 45° and with the camera rotated to all three other sides.
+- [ ] Matches the face density and detail level of neighboring assets.
+- [ ] Uses flat shading and material values from the table.
+- [ ] Contains no baked shadows, text, or branding in textures.
+- [ ] Model, portrait, and icon for the same unit share the same signature silhouette and color.
+- [ ] Does not imply any unsupported game mechanic.
+- [ ] Complies with `visual-asset-specification.md` and is logged in `asset-generation.md` with source and license.
 
-## O que evitar
+## What to Avoid
 
-- Fotorrealismo, ruído fino, sombreamento suave e brilho especular forte.
-- Vermelho em herói ou em cenário dentro da grade.
-- Verde vivo no goblin e púrpura no cultista.
-- Decoração alta dentro da grade que não seja obstáculo de verdade.
-- Elementos que sugiram desnível, objetivo ou chefe.
-- Ícones de famílias diferentes lado a lado.
-- Texto dentro de imagens.
+- Photorealism, fine noise, smooth shading, and strong specular highlights.
+- Red on heroes or on in-grid scenery.
+- Bright green on goblins or purple on cultists.
+- Tall in-grid decoration that is not a real obstacle.
+- Elements suggesting elevation, objectives, or bosses.
+- Mixing different icon families side by side.
+- Text inside images.

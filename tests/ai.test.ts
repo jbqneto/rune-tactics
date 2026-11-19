@@ -14,13 +14,13 @@ const movePath = (action: EnemyAction | null): GridCoord[] => {
 const last = <T>(items: T[]): T => items[items.length - 1];
 
 describe('EnemyAI: regras comuns', () => {
-  it('ataca quando há alvo ao alcance', () => {
+  it('attacks when a target is in range', () => {
     const knight = unit(knightAt(1, 1));
     const skeleton = unit(meleeAt(1, 2));
     expect(nextEnemyAction(skeleton, [knight, skeleton], open)).toEqual({ type: 'attack', target: knight });
   });
 
-  it('anda pelo menor caminho em direção ao alvo, até moveRange passos', () => {
+  it('moves along the shortest path toward target, up to moveRange steps', () => {
     const knight = unit(knightAt(0, 0));
     const skeleton = unit(meleeAt(0, 5));
     expect(movePath(nextEnemyAction(skeleton, [knight, skeleton], open))).toEqual([
@@ -30,7 +30,7 @@ describe('EnemyAI: regras comuns', () => {
     ]);
   });
 
-  it('para na célula adjacente ao alvo, sem gastar o movimento todo', () => {
+  it('stops on the cell adjacent to target without spending all movement', () => {
     const knight = unit(knightAt(0, 0));
     const skeleton = unit(meleeAt(0, 2));
     expect(movePath(nextEnemyAction(skeleton, [knight, skeleton], open))).toEqual([
@@ -45,13 +45,13 @@ describe('EnemyAI: regras comuns', () => {
     expect(nextEnemyAction(skeleton, [knight, skeleton], open)?.type).toBe('attack');
   });
 
-  it('encerra a ação se já se moveu e segue sem alvo ao alcance', () => {
+  it('ends action if already moved and still has no target in range', () => {
     const knight = unit(knightAt(0, 0));
     const skeleton = unit(meleeAt(0, 3), { hasMoved: true });
     expect(nextEnemyAction(skeleton, [knight, skeleton], open)).toBeNull();
   });
 
-  it('não faz mais nada depois de atacar', () => {
+  it('does nothing else after attacking', () => {
     const knight = unit(knightAt(0, 0));
     const skeleton = unit(meleeAt(0, 1), { hasAttacked: true });
     expect(nextEnemyAction(skeleton, [knight, skeleton], open)).toBeNull();
@@ -61,13 +61,13 @@ describe('EnemyAI: regras comuns', () => {
     ['melee-skeleton', meleeAt],
     ['skeleton-archer', boneArcherAt],
     ['armored-skeleton', armoredAt],
-  ] as const)('%s morto não age', (_type, at) => {
+  ] as const)('dead %s does not act', (_type, at) => {
     const knight = unit(knightAt(0, 0));
     const dead = unit(at(0, 1), { alive: false, hp: 0 });
     expect(nextEnemyAction(dead, [knight, dead], open)).toBeNull();
   });
 
-  it('não age se não há aliado vivo, e ignora os mortos como alvo', () => {
+  it('does not act if there are no living allies, and ignores dead ones as targets', () => {
     const deadKnight = unit(knightAt(0, 1), { alive: false, hp: 0 });
     const skeleton = unit(meleeAt(0, 2));
     expect(nextEnemyAction(skeleton, [deadKnight, skeleton], open)).toBeNull();
@@ -76,7 +76,7 @@ describe('EnemyAI: regras comuns', () => {
     expect(last(movePath(nextEnemyAction(skeleton, [deadKnight, mage, skeleton], open)))).toEqual({ x: 0, y: 4 });
   });
 
-  it('contorna obstáculos', () => {
+  it('routes around obstacles', () => {
     const grid = new GridSystem(8, [crate(0, 2)]);
     const knight = unit(knightAt(0, 0));
     const skeleton = unit(meleeAt(0, 3));
@@ -87,7 +87,7 @@ describe('EnemyAI: regras comuns', () => {
     ]);
   });
 
-  it('não atravessa nem ocupa a célula de outra unidade viva', () => {
+  it('does not pass through or occupy another living unit cell', () => {
     const knight = unit(knightAt(0, 0));
     const front = unit(meleeAt(1, 0, 'front'));
     const back = unit(meleeAt(2, 0, 'back'));
@@ -101,7 +101,7 @@ describe('EnemyAI: regras comuns', () => {
     expect(open.isOccupied(last(path), units)).toBe(false);
   });
 
-  it('atravessa a célula de uma unidade morta', () => {
+  it('passes through a dead unit cell', () => {
     const knight = unit(knightAt(0, 0));
     const dead = unit(meleeAt(1, 0, 'front'), { alive: false, hp: 0 });
     const back = unit(meleeAt(2, 0, 'back'));
@@ -111,7 +111,7 @@ describe('EnemyAI: regras comuns', () => {
     ]);
   });
 
-  it('sem caminho até uma posição de ataque, chega o mais perto que consegue', () => {
+  it('without a path to an attack position, gets as close as possible', () => {
     const grid = new GridSystem(8, [crate(1, 0), crate(0, 1)]);
     const knight = unit(knightAt(0, 0));
     const skeleton = unit(meleeAt(5, 0));
@@ -120,7 +120,7 @@ describe('EnemyAI: regras comuns', () => {
     expect(manhattan(last(path), knight.pos)).toBe(3);
   });
 
-  it('fica parado se andar não o aproxima de ninguém', () => {
+  it('stays still if moving does not get closer to anyone', () => {
     const grid = new GridSystem(8, [crate(0, 1)]);
     const knight = unit(knightAt(0, 0));
     const front = unit(meleeAt(1, 0, 'front'));
@@ -128,7 +128,7 @@ describe('EnemyAI: regras comuns', () => {
     expect(nextEnemyAction(back, [knight, front, back], grid)).toBeNull();
   });
 
-  it('é determinística', () => {
+  it('is deterministic', () => {
     const make = () => {
       const knight = unit(knightAt(3, 3));
       const mage = unit(mageAt(2, 2));
@@ -140,25 +140,25 @@ describe('EnemyAI: regras comuns', () => {
 });
 
 describe('EnemyAI: melee-skeleton', () => {
-  it('vai até o aliado mais próximo pelo caminho', () => {
+  it('moves toward the nearest ally along the path', () => {
     const knight = unit(knightAt(0, 0));
     const mage = unit(mageAt(7, 4));
     const skeleton = unit(meleeAt(5, 4));
-    // O guerreiro vem antes na lista, mas o mago está a um passo de distância.
+    // Knight comes first in the list, but Mage is one step away.
     expect(movePath(nextEnemyAction(skeleton, [knight, mage, skeleton], open))).toEqual([
       { x: 5, y: 4 },
       { x: 6, y: 4 },
     ]);
   });
 
-  it('entre os alvos ao alcance, bate no de menos HP', () => {
+  it('among targets in range, hits the one with lowest HP', () => {
     const knight = unit(knightAt(1, 0));
     const mage = unit(mageAt(0, 1));
     const skeleton = unit(meleeAt(1, 1));
     expect(nextEnemyAction(skeleton, [knight, mage, skeleton], open)).toEqual({ type: 'attack', target: mage });
   });
 
-  it('só ataca corpo a corpo', () => {
+  it('only attacks in melee', () => {
     const knight = unit(knightAt(0, 0));
     const skeleton = unit(meleeAt(0, 2));
     expect(nextEnemyAction(skeleton, [knight, skeleton], open)?.type).toBe('move');
@@ -166,14 +166,14 @@ describe('EnemyAI: melee-skeleton', () => {
 });
 
 describe('EnemyAI: armored-skeleton', () => {
-  it('entre os alvos ao alcance, bate no mais próximo, e não no mais fraco', () => {
+  it('among targets in range, hits the closest one rather than the weakest', () => {
     const knight = unit(knightAt(1, 0));
     const mage = unit(mageAt(0, 1));
     const armored = unit(armoredAt(1, 1));
     expect(nextEnemyAction(armored, [knight, mage, armored], open)).toEqual({ type: 'attack', target: knight });
   });
 
-  it('avança para a célula que engaja mais aliados; o melee-skeleton pega a primeira', () => {
+  it('advances to the cell engaging the most allies; melee-skeleton takes the first', () => {
     const knight = unit(knightAt(3, 2));
     const mage = unit(mageAt(2, 3));
     const touching = (cell: GridCoord) => [knight, mage].filter((u) => manhattan(u.pos, cell) === 1).length;
@@ -188,11 +188,11 @@ describe('EnemyAI: armored-skeleton', () => {
     expect(last(meleePath)).toEqual({ x: 4, y: 2 });
     expect(touching(last(meleePath))).toBe(1);
 
-    // Os dois gastam o mesmo número de passos: a diferença é só a escolha da célula.
+    // Both spend the same number of steps: the only difference is cell choice.
     expect(armoredPath).toHaveLength(meleePath.length);
   });
 
-  it('avança mesmo sem chegar ao alvo neste turno', () => {
+  it('advances even without reaching the target this turn', () => {
     const knight = unit(knightAt(0, 0));
     const armored = unit(armoredAt(0, 6));
     expect(last(movePath(nextEnemyAction(armored, [knight, armored], open)))).toEqual({ x: 0, y: 4 });
@@ -200,7 +200,7 @@ describe('EnemyAI: armored-skeleton', () => {
 });
 
 describe('EnemyAI: skeleton-archer', () => {
-  it('atira de longe quando tem alcance e linha de visão', () => {
+  it('shoots from afar when it has range and line of sight', () => {
     const knight = unit(knightAt(0, 0));
     const archer = unit(boneArcherAt(0, 3));
     expect(nextEnemyAction(archer, [knight, archer], open)).toEqual({ type: 'attack', target: knight });
@@ -213,14 +213,14 @@ describe('EnemyAI: skeleton-archer', () => {
     expect(nextEnemyAction(archer, [knight, mage, archer], open)).toEqual({ type: 'attack', target: mage });
   });
 
-  it('caixote não tira a linha de visão', () => {
+  it('crate does not block line of sight', () => {
     const knight = unit(knightAt(0, 0));
     const archer = unit(boneArcherAt(0, 3));
     const grid = new GridSystem(8, [crate(0, 1)]);
     expect(nextEnemyAction(archer, [knight, archer], grid)?.type).toBe('attack');
   });
 
-  it('sem linha de visão, anda até uma célula com tiro e atira de lá', () => {
+  it('without line of sight, moves to a firing cell and shoots from there', () => {
     const knight = unit(knightAt(0, 0));
     const archer = unit(boneArcherAt(0, 2));
     const units = [knight, archer];
@@ -237,7 +237,7 @@ describe('EnemyAI: skeleton-archer', () => {
     expect(nextEnemyAction(archer, units, grid)).toEqual({ type: 'attack', target: knight });
   });
 
-  it('fora de alcance, só se aproxima até ter tiro e não encosta no alvo', () => {
+  it('out of range, only approaches until it has a shot and does not stand adjacent to target', () => {
     const knight = unit(knightAt(0, 0));
     const archer = unit(boneArcherAt(0, 5));
     const path = movePath(nextEnemyAction(archer, [knight, archer], open));
@@ -267,7 +267,7 @@ describe('EnemyAI: skeleton-archer', () => {
     expect(moves).toBeGreaterThan(5);
   });
 
-  it('cercado, sem como chegar a uma célula com tiro nem se aproximar, fica parado', () => {
+  it('surrounded, with no way to reach a firing cell or approach, stays still', () => {
     const knight = unit(knightAt(0, 0));
     const archer = unit(boneArcherAt(7, 7));
     const grid = new GridSystem(8, [crate(6, 7), crate(7, 6)]);
@@ -276,9 +276,9 @@ describe('EnemyAI: skeleton-archer', () => {
 });
 
 describe('EnemyAI: goblin-scout', () => {
-  it('move até 4 células em direção ao aliado vivo mais vulnerável (menor HP)', () => {
-    const knight = unit(knightAt(0, 0)); // HP 10, mais próximo (dist 2)
-    const mage = unit(mageAt(0, 6), { hp: 3 }); // HP 3, mais vulnerável (dist 4)
+  it('moves up to 4 cells toward the most vulnerable living ally (lowest HP)', () => {
+    const knight = unit(knightAt(0, 0)); // HP 10, closer (dist 2)
+    const mage = unit(mageAt(0, 6), { hp: 3 }); // HP 3, more vulnerable (dist 4)
     const goblin = unit(goblinAt(0, 2)); // moveRange 4
 
     const path = movePath(nextEnemyAction(goblin, [knight, mage, goblin], open));
@@ -286,7 +286,7 @@ describe('EnemyAI: goblin-scout', () => {
     expect(last(path)).toEqual({ x: 0, y: 5 });
   });
 
-  it('entre os alvos ao alcance, ataca o de menor HP', () => {
+  it('among targets in range, attacks the one with lowest HP', () => {
     const knight = unit(knightAt(1, 0), { hp: 10 });
     const mage = unit(mageAt(0, 1), { hp: 2 });
     const goblin = unit(goblinAt(1, 1));
@@ -295,14 +295,14 @@ describe('EnemyAI: goblin-scout', () => {
 });
 
 describe('EnemyAI: cultist-mage', () => {
-  it('ataca à distância (alcance 3) com linha de visão e prioriza menor HP', () => {
+  it('attacks at range (range 3) with line of sight and prioritizes lowest HP', () => {
     const knight = unit(knightAt(0, 2), { hp: 10 });
     const mage = unit(mageAt(3, 3), { hp: 4 });
     const cultist = unit(cultistAt(0, 3));
     expect(nextEnemyAction(cultist, [knight, mage, cultist], open)).toEqual({ type: 'attack', target: mage });
   });
 
-  it('ao buscar posição de tiro, prefere manter distância >= 2 dos aliados', () => {
+  it('when seeking a firing position, prefers keeping distance >= 2 from allies', () => {
     const knight = unit(knightAt(0, 0));
     const cultist = unit(cultistAt(0, 5));
     const path = movePath(nextEnemyAction(cultist, [knight, cultist], open));

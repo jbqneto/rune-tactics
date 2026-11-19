@@ -5,12 +5,12 @@ export function isEligible(unit: Pick<UnitState, 'alive' | 'hasActivatedThisRoun
 }
 
 /**
- * Constrói a ordem fixa intercalada de ativações:
- * aliado[0], inimigo[0], aliado[1], inimigo[1], ..., sobrando o restante da equipe maior no final.
+ * Builds the fixed interleaved activation order:
+ * ally[0], enemy[0], ally[1], enemy[1], ..., with any remaining units of the larger team at the end.
  */
-export function buildTurnOrder(units: readonly UnitState[]): string[] {
-  const players = units.filter((u) => u.team === 'player').map((u) => u.id);
-  const enemies = units.filter((u) => u.team === 'enemy').map((u) => u.id);
+export function buildTurnOrder(units: readonly UnitState[], firstTeam: Team = 'player'): string[] {
+  const players = units.filter((u) => u.team === firstTeam).map((u) => u.id);
+  const enemies = units.filter((u) => u.team !== firstTeam).map((u) => u.id);
   const order: string[] = [];
   const maxLen = Math.max(players.length, enemies.length);
   for (let i = 0; i < maxLen; i++) {
@@ -46,10 +46,10 @@ export class TurnSystem {
     return this.turnState === 'victory' || this.turnState === 'defeat';
   }
 
-  reset(units: UnitState[]): void {
+  reset(units: UnitState[], firstTeam: Team = 'player'): void {
     this.round = 1;
     this.winner = null;
-    this.turnOrder = buildTurnOrder(units);
+    this.turnOrder = buildTurnOrder(units, firstTeam);
     this.turnIndex = 0;
     this.activeUnitId = null;
 
@@ -74,7 +74,7 @@ export class TurnSystem {
     this.turnState = firstUnit.team === 'player' ? 'player_unit_active' : 'enemy_activation';
   }
 
-  /** Encerra a ativação atual e avança deterministicamente para a próxima unidade viva na `turnOrder`. */
+  /** Ends the current activation and deterministically advances to the next living unit in `turnOrder`. */
   advanceTurn(activeUnit: UnitState, units: UnitState[]): GameEvent[] {
     if (this.isOver || this.turnOrder.length === 0) return [];
 
@@ -85,7 +85,7 @@ export class TurnSystem {
     let wrappedNewRound = false;
     let nextIdx = -1;
 
-    // 1. Procura a próxima unidade viva após turnIndex até o fim da turnOrder
+    // 1. Find the next living unit after turnIndex through the end of turnOrder
     for (let i = this.turnIndex + 1; i < this.turnOrder.length; i++) {
       const candidate = units.find((u) => u.id === this.turnOrder[i]);
       if (candidate?.alive) {
@@ -94,7 +94,7 @@ export class TurnSystem {
       }
     }
 
-    // 2. Se chegou ao fim da turnOrder, vira a rodada e procura do índice 0
+    // 2. If the end of turnOrder was reached, start a new round and search from index 0
     if (nextIdx === -1) {
       wrappedNewRound = true;
       this.round += 1;
@@ -141,7 +141,7 @@ export class TurnSystem {
     return events;
   }
 
-  /** Encerra a batalha imediatamente se um dos times não tem mais unidades vivas. */
+  /** Immediately ends the battle if one team has no living units remaining. */
   checkBattleEnd(units: readonly UnitState[]): GameEvent[] {
     if (this.isOver) return [];
     const hasAlive = (team: Team) => units.some((u) => u.team === team && u.alive);

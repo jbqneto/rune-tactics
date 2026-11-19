@@ -25,7 +25,17 @@ export interface SceneAtmosphereConfig {
   rimIntensity?: number;
   rimPosition?: readonly [number, number, number];
   pointLights?: readonly ScenePointLightConfig[];
+  particleColor?: number;
+  particleOpacity?: number;
 }
+
+const PARTICLE_COUNT = 100;
+const PARTICLE_X_MIN = -8.5;
+const PARTICLE_X_SPAN = 17.0;
+const PARTICLE_Y_MIN = 0.35;
+const PARTICLE_Y_SPAN = 4.15;
+const PARTICLE_Z_MIN = -8.5;
+const PARTICLE_Z_SPAN = 17.0;
 
 export class SceneManager {
   readonly scene: THREE.Scene;
@@ -40,6 +50,11 @@ export class SceneManager {
   private hemiLight!: THREE.HemisphereLight;
   private dirLight!: THREE.DirectionalLight;
   private rimLight!: THREE.DirectionalLight;
+  private particleGeometry!: THREE.BufferGeometry;
+  private particleMaterial!: THREE.PointsMaterial;
+  private particleTexture: THREE.CanvasTexture | null = null;
+  private particles!: THREE.Points;
+  private particleVelocities!: Float32Array;
   private rafId: number | null = null;
   private lastTime = 0;
   private elapsed = 0;
@@ -71,7 +86,9 @@ export class SceneManager {
       antialias: true,
       powerPreference: 'high-performance',
     });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    // Phones have 3x DPR but small, hot GPUs: 1.5x is visually close and far cheaper.
+    const isCoarsePointer = window.matchMedia?.('(pointer: coarse)').matches ?? false;
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, isCoarsePointer ? 1.5 : 2));
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -79,6 +96,7 @@ export class SceneManager {
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
 
     this.setupLights();
+    this.setupParticles();
 
     this.handleResizeBound = () => this.resize();
     window.addEventListener('resize', this.handleResizeBound);
@@ -91,11 +109,11 @@ export class SceneManager {
     this.scene.add(this.ambientLight);
 
     // Blue-teal hemisphere sky/ground fill for FFT-style diorama contrast
-    this.hemiLight = new THREE.HemisphereLight(0x8ec5e8, 0x1e3536, 0.62);
+    this.hemiLight = new THREE.HemisphereLight(0x8ec5e8, 0x162436, 0.62);
     this.scene.add(this.hemiLight);
 
     // Crisp warm directional key light with shadows
-    this.dirLight = new THREE.DirectionalLight(0xfff1d6, 1.38);
+    this.dirLight = new THREE.DirectionalLight(0xffe8c2, 1.45);
     this.dirLight.position.set(11, 18, 8);
     this.dirLight.castShadow = true;
     this.dirLight.shadow.mapSize.width = 2048;
@@ -132,6 +150,92 @@ export class SceneManager {
         phase: idx * 1.7,
       });
     });
+  }
+
+  private setupParticles(): void {
+    const positions = new Float32Array(PARTICLE_COUNT * 3);
+    this.particleVelocities = new Float32Array(PARTICLE_COUNT * 3);
+
+    // Deterministic LCG so atmospheric dust distribution is consistent across loads
+    let seed = 0x51a7c3;
+    const nextRand = (): number => {
+      seed = (seed * 1664525 + 1013904223) >>> 0;
+      return seed / 0x100000000;
+    };
+
+    for (let i = 0; i < PARTICLE_COUNT; i++) {
+      const idx = i * 3;
+      positions[idx] = PARTICLE_X_MIN + nextRand() * PARTICLE_X_SPAN;
+      positions[idx + 1] = PARTICLE_Y_MIN + nextRand() * PARTICLE_Y_SPAN;
+      positions[idx + 2] = PARTICLE_Z_MIN + nextRand() * PARTICLE_Z_SPAN;
+
+      this.particleVelocities[idx] = (nextRand() - 0.5) * 0.26;
+      this.particleVelocities[idx + 1] = 0.05 + nextRand() * 0.14;
+      this.particleVelocities[idx + 2] = (nextRand() - 0.5) * 0.26;
+    }
+
+    this.particleGeometry = new THREE.BufferGeometry();
+    this.particleGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+
+    const spriteCanvas = document.createElement('canvas');
+    spriteCanvas.width = 32;
+    spriteCanvas.height = 32;
+    const ctx = spriteCanvas.getContext('2d');
+    if (ctx) {
+      const grad = ctx.createRadialGradient(16, 16, 0, 16, 16, 16);
+      grad.addColorStop(0, 'rgba(255, 255, 255, 1)');
+      grad.addColorStop(0.45, 'rgba(255, 255, 255, 0.55)');
+      grad.addColorStop(1, 'rgba(255, 255, 255, 0)');
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, 32, 32);
+      this.particleTexture = new THREE.CanvasTexture(spriteCanvas);
+    }
+
+    this.particleMaterial = new THREE.PointsMaterial({
+      color: 0xfde68a,
+      size: 4.5,
+      sizeAttenuation: false,
+      map: this.particleTexture,
+      transparent: true,
+      opacity: 0.38,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    });
+
+    this.particles = new THREE.Points(this.particleGeometry, this.particleMaterial);
+    this.particles.raycast = () => {};
+    this.scene.add(this.particles);
+  }
+
+  private updateParticles(dt: number): void {
+    const posAttr = this.particleGeometry.getAttribute('position') as THREE.BufferAttribute;
+    const arr = posAttr.array as Float32Array;
+    const vel = this.particleVelocities;
+    const xMax = PARTICLE_X_MIN + PARTICLE_X_SPAN;
+    const yMax = PARTICLE_Y_MIN + PARTICLE_Y_SPAN;
+    const zMax = PARTICLE_Z_MIN + PARTICLE_Z_SPAN;
+
+    for (let i = 0; i < PARTICLE_COUNT; i++) {
+      const idx = i * 3;
+      let x = arr[idx] + vel[idx] * dt;
+      let y = arr[idx + 1] + vel[idx + 1] * dt;
+      let z = arr[idx + 2] + vel[idx + 2] * dt;
+
+      if (x < PARTICLE_X_MIN) x += PARTICLE_X_SPAN;
+      else if (x > xMax) x -= PARTICLE_X_SPAN;
+
+      if (y < PARTICLE_Y_MIN) y += PARTICLE_Y_SPAN;
+      else if (y > yMax) y -= PARTICLE_Y_SPAN;
+
+      if (z < PARTICLE_Z_MIN) z += PARTICLE_Z_SPAN;
+      else if (z > zMax) z -= PARTICLE_Z_SPAN;
+
+      arr[idx] = x;
+      arr[idx + 1] = y;
+      arr[idx + 2] = z;
+    }
+
+    posAttr.needsUpdate = true;
   }
 
   /**
@@ -219,6 +323,14 @@ export class SceneManager {
         }
       }
     }
+
+    if (config.particleColor !== undefined) {
+      this.particleMaterial.color.setHex(config.particleColor);
+    }
+    if (config.particleOpacity !== undefined) {
+      this.particleMaterial.opacity = config.particleOpacity;
+      this.particleMaterial.visible = config.particleOpacity > 0;
+    }
   }
 
   private getAspect(): number {
@@ -265,6 +377,7 @@ export class SceneManager {
         torch.light.intensity = Math.max(0, torch.baseIntensity + flicker);
       }
 
+      this.updateParticles(dt);
       this.cameraController.update(dt);
       this.onFrameCallback?.(dt);
       this.renderer.render(this.scene, this.camera);
@@ -275,12 +388,24 @@ export class SceneManager {
     this.rafId = requestAnimationFrame(tick);
   }
 
+  setAzimuth(azimuthRad: number, immediate = true): void {
+    this.cameraController.setAzimuth(azimuthRad, immediate);
+  }
+
+  getAzimuth(): number {
+    return this.cameraController.currentAzimuth;
+  }
+
   dispose(): void {
     if (this.rafId !== null) {
       cancelAnimationFrame(this.rafId);
       this.rafId = null;
     }
     window.removeEventListener('resize', this.handleResizeBound);
+    this.scene.remove(this.particles);
+    this.particleGeometry.dispose();
+    this.particleMaterial.dispose();
+    this.particleTexture?.dispose();
     this.cameraController.dispose();
     this.renderer.dispose();
   }

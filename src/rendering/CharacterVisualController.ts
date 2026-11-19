@@ -173,14 +173,14 @@ export class CharacterVisualController {
   private mountGlb(gltf: GLTF, spec: ModelSpec): void {
     const cloned = SkeletonUtils.clone(gltf.scene) as THREE.Group;
 
-    // Normalizar escala e pivô no chão (y = 0)
+    // Normalize scale and ground pivot (y = 0)
     const box = new THREE.Box3().setFromObject(cloned);
     const size = new THREE.Vector3();
     box.getSize(size);
     const scale = size.y > 0.001 ? spec.targetHeight / size.y : 1;
     cloned.scale.setScalar(scale);
 
-    // Recalcular bounds após escala para centralizar X/Z e apoiar Y em 0
+    // Recompute bounds after scaling to center X/Z and rest Y at 0
     const scaledBox = new THREE.Box3().setFromObject(cloned);
     const center = new THREE.Vector3();
     scaledBox.getCenter(center);

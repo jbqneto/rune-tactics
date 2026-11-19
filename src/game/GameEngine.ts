@@ -30,7 +30,7 @@ import { GridSystem, manhattan, sameCell } from './grid/GridSystem';
 import { createRng, pickMap, randomizeUnitSpawns } from './maps/MapSystem';
 import { TurnSystem } from './turns/TurnSystem';
 
-/** Cenário da partida. O padrão usa `MAPS` e `INITIAL_UNITS`; os testes podem passar overrides. */
+/** Match scenario. Defaults to `MAPS` and `INITIAL_UNITS`; tests may pass overrides. */
 export interface GameSetup {
   gridSize?: number;
   obstacles?: ObstacleDef[];
@@ -42,6 +42,8 @@ export interface GameSetup {
   stageNumber?: number;
   stageName?: string;
   heroOverrides?: CampaignHeroProgress[];
+  allowEnemyActions?: boolean;
+  startingTeam?: 'player' | 'enemy';
 }
 
 interface UndoSnapshot {
@@ -74,7 +76,7 @@ export class GameEngine implements IGameEngine {
   private undoSnapshot: UndoSnapshot | null = null;
 
   private currentMapId = 'ruins';
-  private currentMapName = 'Ruínas Atuais';
+  private currentMapName = 'Ancient Ruins';
   private currentSeed = 0;
   private lastMapId: string | null = null;
   private matchCount = 0;
@@ -113,7 +115,7 @@ export class GameEngine implements IGameEngine {
 
   selectUnit(unitId: string | null): ActionResult {
     if (this.turns.turnState !== 'player_unit_active' || unitId !== this.turns.activeUnitId) {
-      return fail('Não é possível alterar a unidade ativa.');
+      return fail('Cannot change the active unit.');
     }
     return OK;
   }
@@ -207,8 +209,8 @@ export class GameEngine implements IGameEngine {
   moveSelectedUnit(to: GridCoord): ActionResult {
     const unit = this.activePlayerUnit();
     if (typeof unit === 'string') return fail(unit);
-    if (unit.hasMoved) return fail('A unidade já se moveu nesta ativação.');
-    if (!this.getReachableCells(unit.id).some((c) => sameCell(c, to))) return fail('Célula fora do alcance.');
+    if (unit.hasMoved) return fail('Unit has already moved this activation.');
+    if (!this.getReachableCells(unit.id).some((c) => sameCell(c, to))) return fail('Cell is out of range.');
 
     const prevPos = { x: unit.pos.x, y: unit.pos.y };
     const path = this.grid.getPath(unit.pos, to, this.units)!;
@@ -226,7 +228,7 @@ export class GameEngine implements IGameEngine {
 
   undoMove(): ActionResult {
     if (!this.canUndoMoveNow()) {
-      return fail('Não é possível desfazer o movimento agora.');
+      return fail('Cannot undo movement right now.');
     }
     const unit = this.findUnit(this.turns.activeUnitId)!;
     const currentPos = { x: unit.pos.x, y: unit.pos.y };
@@ -243,13 +245,13 @@ export class GameEngine implements IGameEngine {
   attackTarget(targetId: string): ActionResult {
     const unit = this.activePlayerUnit();
     if (typeof unit === 'string') return fail(unit);
-    if (unit.hasAttacked) return fail('A unidade já atacou nesta ativação.');
+    if (unit.hasAttacked) return fail('Unit has already attacked this activation.');
     const target = this.findUnit(targetId);
-    if (!target) return fail('Alvo não encontrado.');
-    if (!target.alive) return fail('O alvo está morto.');
-    if (target.team === unit.team) return fail('O alvo não é inimigo.');
-    if (manhattan(unit.pos, target.pos) > unit.attackRange) return fail('Alvo fora do alcance.');
-    if (!canAttack(unit, target, this.grid)) return fail('Sem linha de visão até o alvo.');
+    if (!target) return fail('Target not found.');
+    if (!target.alive) return fail('Target is dead.');
+    if (target.team === unit.team) return fail('Target is not an enemy.');
+    if (manhattan(unit.pos, target.pos) > unit.attackRange) return fail('Target is out of range.');
+    if (!canAttack(unit, target, this.grid)) return fail('No line of sight to target.');
 
     this.undoSnapshot = null;
     this.pushCombatEvents(resolveAttack(unit, target));
@@ -261,11 +263,11 @@ export class GameEngine implements IGameEngine {
     const unit = this.activePlayerUnit();
     if (typeof unit === 'string') return fail(unit);
     const skill = getSkill(unit);
-    if (!skill) return fail('A unidade não tem habilidade.');
-    if (unit.hasAttacked) return fail('A unidade já atacou nesta ativação.');
-    if (unit.skillCooldown > 0) return fail(`${skill.name} em recarga: faltam ${unit.skillCooldown} rodada(s).`);
+    if (!skill) return fail('Unit has no skill.');
+    if (unit.hasAttacked) return fail('Unit has already attacked this activation.');
+    if (unit.skillCooldown > 0) return fail(`${skill.name} is on cooldown: ${unit.skillCooldown} round(s) remaining.`);
     if (!isValidSkillTarget(unit, skill, targetCell, this.units, this.grid)) {
-      return fail(`Célula inválida para ${skill.name}.`);
+      return fail(`Invalid target cell for ${skill.name}.`);
     }
 
     this.undoSnapshot = null;
@@ -277,7 +279,7 @@ export class GameEngine implements IGameEngine {
   defend(): ActionResult {
     const unit = this.activePlayerUnit();
     if (typeof unit === 'string') return fail(unit);
-    if (unit.hasAttacked) return fail('A unidade já agiu nesta ativação.');
+    if (unit.hasAttacked) return fail('Unit has already acted this activation.');
 
     this.undoSnapshot = null;
     this.events.push(...resolveDefend(unit));
@@ -286,9 +288,9 @@ export class GameEngine implements IGameEngine {
   }
 
   getSmartAttackPlan(targetId: string): SmartActionPlan | null {
-    if (this.turns.isOver || this.turns.turnState !== 'player_unit_active') return null;
+    if (this.turns.isOver || (!this.setup.allowEnemyActions && this.turns.turnState !== 'player_unit_active')) return null;
     const unit = this.findUnit(this.turns.activeUnitId);
-    if (!unit || !unit.alive || unit.team !== 'player' || unit.hasAttacked) return null;
+    if (!unit || !unit.alive || (!this.setup.allowEnemyActions && unit.team !== 'player') || unit.hasAttacked) return null;
 
     const target = this.findUnit(targetId);
     if (!target || !target.alive || target.team === unit.team) return null;
@@ -325,7 +327,7 @@ export class GameEngine implements IGameEngine {
 
   smartAttack(targetId: string): ActionResult {
     const plan = this.getSmartAttackPlan(targetId);
-    if (!plan) return fail('Ataque inteligente indisponível para este alvo.');
+    if (!plan) return fail('Smart attack unavailable for this target.');
 
     const unit = this.findUnit(this.turns.activeUnitId)!;
     const target = this.findUnit(targetId)!;
@@ -344,9 +346,9 @@ export class GameEngine implements IGameEngine {
   }
 
   getSmartSkillPlan(targetCell: GridCoord): SmartActionPlan | null {
-    if (this.turns.isOver || this.turns.turnState !== 'player_unit_active') return null;
+    if (this.turns.isOver || (!this.setup.allowEnemyActions && this.turns.turnState !== 'player_unit_active')) return null;
     const unit = this.findUnit(this.turns.activeUnitId);
-    if (!unit || !unit.alive || unit.team !== 'player' || unit.hasAttacked || unit.skillCooldown > 0) {
+    if (!unit || !unit.alive || (!this.setup.allowEnemyActions && unit.team !== 'player') || unit.hasAttacked || unit.skillCooldown > 0) {
       return null;
     }
     const skill = getSkill(unit);
@@ -384,7 +386,7 @@ export class GameEngine implements IGameEngine {
 
   smartUseSkill(targetCell: GridCoord): ActionResult {
     const plan = this.getSmartSkillPlan(targetCell);
-    if (!plan) return fail('Habilidade inteligente indisponível para esta célula.');
+    if (!plan) return fail('Smart skill unavailable for this cell.');
 
     const unit = this.findUnit(this.turns.activeUnitId)!;
     const skill = getSkill(unit)!;
@@ -522,7 +524,7 @@ export class GameEngine implements IGameEngine {
       : baseSpawns;
 
     this.units = createUnits(resolvedSpawns, this.setup.heroOverrides);
-    this.turns.reset(this.units);
+    this.turns.reset(this.units, this.setup.startingTeam);
     this.events = [];
     this.pendingAttacks = [];
     this.pendingAttackCounter = 0;
@@ -549,9 +551,9 @@ export class GameEngine implements IGameEngine {
   }
 
   private canUndoMoveNow(): boolean {
-    if (this.turns.isOver || this.turns.turnState !== 'player_unit_active') return false;
+    if (this.turns.isOver || (!this.setup.allowEnemyActions && this.turns.turnState !== 'player_unit_active')) return false;
     const unit = this.findUnit(this.turns.activeUnitId);
-    if (!unit || !unit.alive || unit.team !== 'player') return false;
+    if (!unit || !unit.alive || (!this.setup.allowEnemyActions && unit.team !== 'player')) return false;
     if (!unit.hasMoved || unit.hasAttacked) return false;
     if (!this.undoSnapshot || this.undoSnapshot.unitId !== unit.id || this.undoSnapshot.used) {
       return false;
@@ -560,10 +562,10 @@ export class GameEngine implements IGameEngine {
   }
 
   private activePlayerUnit(): UnitState | string {
-    if (this.turns.isOver) return 'A batalha já terminou.';
-    if (this.turns.turnState !== 'player_unit_active') return 'Não é a vez do jogador.';
+    if (this.turns.isOver) return 'The battle has already ended.';
+    if (!this.setup.allowEnemyActions && this.turns.turnState !== 'player_unit_active') return 'It is not the player turn.';
     const unit = this.findUnit(this.turns.activeUnitId);
-    if (!unit || !unit.alive || unit.team !== 'player') return 'Nenhuma unidade ativa válida.';
+    if (!unit || !unit.alive || (!this.setup.allowEnemyActions && unit.team !== 'player')) return 'No valid active unit.';
     return unit;
   }
 

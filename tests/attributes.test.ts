@@ -13,7 +13,7 @@ import {
 import type { UnitAttributes } from '../src/shared/types';
 
 describe('AttributeSystem (V4)', () => {
-  it('calcula offensiveBonus corretamente para valores de 1 a 12', () => {
+  it('computes offensiveBonus correctly for values 1 to 12', () => {
     const expected: Record<number, number> = {
       1: 0,
       2: 0,
@@ -33,7 +33,7 @@ describe('AttributeSystem (V4)', () => {
     }
   });
 
-  it('calcula calcMaxHp corretamente para fort de 1 a 12', () => {
+  it('computes calcMaxHp correctly for fort 1 to 12', () => {
     const baseHp = 8;
     expect(calcMaxHp(baseHp, 1)).toBe(8);
     expect(calcMaxHp(baseHp, 4)).toBe(8);
@@ -43,7 +43,7 @@ describe('AttributeSystem (V4)', () => {
     expect(calcMaxHp(baseHp, 12)).toBe(24);
   });
 
-  it('calcula fortitudeResistance corretamente para fort de 1 a 12', () => {
+  it('computes fortitudeResistance correctly for fort 1 to 12', () => {
     for (let fort = 1; fort <= 7; fort++) {
       expect(fortitudeResistance(fort)).toBe(0);
     }
@@ -53,7 +53,7 @@ describe('AttributeSystem (V4)', () => {
     expect(fortitudeResistance(12)).toBe(2);
   });
 
-  it('mapeia corretamente o atributo pelo attackKind explícito', () => {
+  it('maps the attribute correctly by explicit attackKind', () => {
     const attrs: UnitAttributes = { str: 6, dex: 8, int: 10, fort: 5 };
     expect(getAttributeForAttack(attrs, 'melee')).toBe(6);
     expect(getAttributeForAttack(attrs, 'ranged')).toBe(8);
@@ -67,7 +67,7 @@ describe('AttributeSystem (V4)', () => {
   });
 
   describe('applyAttributePoint', () => {
-    it('aplica ponto em str/dex/int sem mutar o objeto original', () => {
+    it('applies point to str/dex/int without mutating original object', () => {
       const hero: AttributeProgressionTarget = {
         baseHp: 8,
         hp: 10,
@@ -83,12 +83,12 @@ describe('AttributeSystem (V4)', () => {
         expect(res.hero.hp).toBe(10);
         expect(res.hero.maxHp).toBe(12);
       }
-      // Imutabilidade
+      // Immutability
       expect(hero.attributes.str).toBe(6);
       expect(hero.unspentPoints).toBe(2);
     });
 
-    it('ao aumentar FORT de 6 para 7 com dano prévio (7/12), soma apenas +2 de hpGain -> 9/14 sem curar dano anterior', () => {
+    it('when increasing FORT from 6 to 7 with prior damage (7/12), adds only +2 hpGain -> 9/14 without healing prior damage', () => {
       const hero: AttributeProgressionTarget = {
         baseHp: 8,
         hp: 7,
@@ -106,7 +106,7 @@ describe('AttributeSystem (V4)', () => {
       }
     });
 
-    it('ao aumentar FORT de 3 para 4 (abaixo do limiar 4), hpGain é 0 e hp não muda', () => {
+    it('when increasing FORT from 3 to 4 (below threshold 4), hpGain is 0 and hp does not change', () => {
       const hero: AttributeProgressionTarget = {
         baseHp: 8,
         hp: 5,
@@ -123,7 +123,7 @@ describe('AttributeSystem (V4)', () => {
       }
     });
 
-    it('recusa evolução quando unspentPoints <= 0 ou atributo está em MAX_ATTRIBUTE (12)', () => {
+    it('rejects upgrade when unspentPoints <= 0 or attribute is at MAX_ATTRIBUTE (12)', () => {
       const noPoints: AttributeProgressionTarget = {
         baseHp: 8,
         hp: 8,

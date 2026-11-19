@@ -18,10 +18,10 @@ export type EnemyAction =
       cooldown: number;
     };
 
-/** Distância que unidades à distância (arqueiro, cultista e acólito) tentam manter dos alvos. */
+/** Distance that ranged units (archer, cultist, and acolyte) try to keep from targets. */
 const RANGED_SAFE_DISTANCE = 2;
 
-/** O primeiro elemento de menor pontuação; no empate, vale a ordem da lista. */
+/** First element with the lowest score; on ties, preserves list order. */
 function minBy<T>(items: readonly T[], score: (item: T) => number): T | undefined {
   let best: T | undefined;
   let bestScore = Infinity;
@@ -32,7 +32,7 @@ function minBy<T>(items: readonly T[], score: (item: T) => number): T | undefine
   return best;
 }
 
-/** O primeiro elemento segundo um comparador determinístico (< 0 significa `a` melhor que `b`). */
+/** First element according to a deterministic comparator (< 0 means `a` is better than `b`). */
 function bestBy<T>(items: readonly T[], compare: (a: T, b: T) => number): T | undefined {
   let best: T | undefined;
   for (const item of items) {
@@ -41,7 +41,7 @@ function bestBy<T>(items: readonly T[], compare: (a: T, b: T) => number): T | un
   return best;
 }
 
-/** Área do ataque anunciado do chefe `ashen-guardian`: cruz na Fase 1, 3×3 na Fase 2. */
+/** Telegraphed attack area for the `ashen-guardian` boss: cross in Phase 1, 3x3 in Phase 2. */
 export function getBossAttackArea(center: GridCoord, bossPhase: 1 | 2, grid: GridSystem): GridCoord[] {
   if (!grid.isInBounds(center)) return [];
   if (bossPhase === 1) {
@@ -291,6 +291,7 @@ function nextAshenGuardianAction(
     for (let y = 0; y < grid.size; y++) {
       for (let x = 0; x < grid.size; x++) {
         const center = { x, y };
+        if (grid.isObstacle(center)) continue;
         const dist = manhattan(enemy.pos, center);
         if (dist > phaseAttack.range) continue;
         const area = getBossAttackArea(center, bossPhase, grid);
@@ -353,8 +354,8 @@ function nextAshenGuardianAction(
 }
 
 /**
- * Próximo passo do inimigo na ativação atual, ou `null` se ele não tem mais o que fazer.
- * Não altera nada: quem aplica a ação é o motor.
+ * Next step for the enemy in the current activation, or `null` if it has nothing left to do.
+ * Does not mutate anything: the engine applies the action.
  */
 export function nextEnemyAction(enemy: UnitState, units: readonly UnitState[], grid: GridSystem): EnemyAction | null {
   if (!enemy.alive || enemy.hasAttacked) return null;

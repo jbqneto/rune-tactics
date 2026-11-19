@@ -1,14 +1,14 @@
-# Design dos Inimigos, Chefe e Reuso de Modelos 3D — Rune Tactics V4
+# Enemy Design, Boss, and 3D Model Reuse — Rune Tactics V4
 
-Este documento define os templates de atributos/armadura, os perfis determinísticos de IA (`src/game/ai/EnemyAI.ts`) para todos os inimigos da V4 (5 existentes + 3 novos + chefe `ashen-guardian`) e o mapeamento exato de reutilização dos modelos `.glb` KayKit CC0 existentes em `public/assets/models/`.
+This document defines the attribute/armor templates, deterministic AI profiles (`src/game/ai/EnemyAI.ts`) for all V4 enemies (5 existing + 3 new + boss `ashen-guardian`), and the exact reuse mapping of existing KayKit CC0 `.glb` models in `public/assets/models/`.
 
 ---
 
-## 1. Regras Gerais da IA (`EnemyAI.ts`)
+## 1. General AI Rules (`EnemyAI.ts`)
 
-- Toda decisão de IA permanece **100% determinística** (sem `Math.random`), executada em passos via `executeNextEnemyAction()` (1 movimento ou 1 ação tática por chamada).
-- A função `minBy(items, score)` desempata estritamente pela ordem da lista (e as células de `GridSystem` mantêm ordem fixa de BFS `STEPS`), garantindo resultados reproduzíveis em testes Node.
-- A partir da V4, `EnemyAI` retorna quatro possíveis ações (`EnemyAction`):
+- All AI decision-making remains **100% deterministic** (no `Math.random`), executed step-by-step via `executeNextEnemyAction()` (1 move or 1 tactical action per call).
+- The `minBy(items, score)` helper breaks ties strictly by list order (and `GridSystem` cells preserve fixed `STEPS` BFS order), ensuring reproducible results in Node tests.
+- Starting in V4, `EnemyAI` returns five possible actions (`EnemyAction`):
   ```ts
   export type EnemyAction =
     | { type: 'attack'; target: UnitState }
@@ -17,111 +17,111 @@ Este documento define os templates de atributos/armadura, os perfis determiníst
     | { type: 'skill'; skillId: SkillId; targetCell: GridCoord }
     | { type: 'prepareAttack'; skillName: string; targetCells: GridCoord[]; basePower: number; attackKind: AttackKind; cooldown: number };
   ```
-- **Nota de dano na IA**: para avaliar finalizações (`canKill`), a IA consulta a função pura `computeDamage(...)` do `CombatSystem` em vez de ler `attacker.damage` cru — respeitando armadura, Fortitude e postura defensiva (`isGuarding`) do alvo!
+- **AI damage note**: to evaluate lethal kills (`canKill`), the AI queries the pure `computeDamage(...)` function in `CombatSystem` rather than reading raw `attacker.damage` — properly accounting for target armor, Fortitude, and defensive stance (`isGuarding`)!
 
 ---
 
-## 2. Inimigos Existentes (Adaptados aos Atributos V4)
+## 2. Existing Enemies (Adapted to V4 Attributes)
 
-Os cinco tipos clássicos mantêm sua identidade tática da V2.2, agora parametrizados com atributos V4, `baseArmor`, `basePower` e `attackKind`:
+The five classic enemy types keep their V2.2 tactical identity, now parameterized with V4 attributes, `baseArmor`, `basePower`, and `attackKind`:
 
-| Tipo (`UnitType`) | Nome em jogo | `attackKind` | Comportamento determinístico preservado |
+| Type (`UnitType`) | In-game Name | `attackKind` | Preserved Deterministic Behavior |
 |---|---|---|---|
-| `melee-skeleton` | Esqueleto | `melee` (`str`) | Ataca o herói ao alcance com menor `hp` (empate: menor Manhattan); fora de alcance, anda pelo menor caminho até a célula de ataque mais próxima. |
-| `skeleton-archer` | Arqueiro Esqueleto | `ranged` (`dex`) | Ataca o herói ao alcance com LoS de menor `hp`; ao mover, busca célula com LoS preferindo distância `>= 2` (`RANGED_SAFE_DISTANCE`) de qualquer herói. |
-| `armored-skeleton` | Esqueleto Blindado | `melee` (`str`) | Ataca o herói mais próximo (empate: menor `hp`); ao mover, entre células de ataque de menor custo em passos, escolhe a que fica adjacente ao maior número de heróis. |
-| `goblin-scout` | Batedor Goblin | `melee` (`str`) | Alta mobilidade (`moveRange: 4`). Prioriza alcançar e atacar o herói vivo de menor `hp` atual. |
-| `cultist-mage` | Mago Cultista | `magic` (`int`) | Dispara magia (`attackRange: 3`, LoS) no herói de menor `hp`; ao mover, busca célula com LoS mantendo distância `>= 2`. |
+| `melee-skeleton` | Melee Skeleton | `melee` (`str`) | Attacks the in-range hero with the lowest `hp` (tie-breaker: lowest Manhattan distance); when out of range, takes the shortest path to the nearest attack cell. |
+| `skeleton-archer` | Skeleton Archer | `ranged` (`dex`) | Attacks the in-range hero with LoS and lowest `hp`; when moving, seeks a cell with LoS preferring distance `>= 2` (`RANGED_SAFE_DISTANCE`) from any hero. |
+| `armored-skeleton` | Armored Skeleton | `melee` (`str`) | Attacks the nearest hero (tie-breaker: lowest `hp`); when moving, among shortest-path attack cells, chooses the one adjacent to the most heroes. |
+| `goblin-scout` | Goblin Scout | `melee` (`str`) | High mobility (`moveRange: 4`). Prioritizes reaching and attacking the living hero with the lowest current `hp`. |
+| `cultist-mage` | Cultist Mage | `magic` (`int`) | Fires magic (`attackRange: 3`, LoS) at the lowest-`hp` hero; when moving, seeks a cell with LoS while keeping distance `>= 2`. |
 
 ---
 
-## 3. Novos Inimigos da V4
+## 3. New V4 Enemies
 
-### 3.1 `goblin-stalker` — Espreitador Goblin (Flanqueador Letal)
+### 3.1 `goblin-stalker` — Goblin Stalker (Lethal Flanker)
 
-- **Identidade**: Versão agressiva e mortal do goblin batedor. Não usa escudo nem postura defensiva; foi feito para punir retaguardas mal protegidas (Mago e Arqueira) atravessando pontes ou flancos.
-- **Atributos / Perfil**: `moveRange: 4`, `attackRange: 1`, `attackKind: 'melee'` (`str: 7`, que concede `+1` de bônus ofensivo -> `attackPower = 3`, `baseArmor: 0`).
-- **IA Determinística**:
-  1. **Alvo prioritário** (`stalkerScore(target)`): ordena heróis vivos pelo menor `hp` atual; no empate, pelo menor `totalDefense` (`baseArmor + fortitudeResistance(fort)`); no empate, menor Manhattan; no empate, ordem da lista.
-  2. **Se já há heróis ao alcance (`inRange.length > 0`)**: ataca o de menor `stalkerScore` (se algum golpe for fatal pelo `computeDamage`, escolhe o alvo abatível de maior `attackPower` potencial primeiro).
-  3. **Se fora de alcance e `!hasMoved`**: busca entre todas as células alcançáveis com ataque disponível (`firingCells`, até `moveRange` se possível, senão todas alcançáveis via BFS) a que ataca o herói de menor `stalkerScore`, desempatando por menor número de passos e depois por células que tenham **menos outros heróis adjacentes** (tende a evitar ser cercado pelo Guerreiro+Clérigo quando há espaço para flanquear). Se não houver célula de ataque possível no mapa, aproxima-se do herói de menor `stalkerScore`.
+- **Identity**: Aggressive, deadlier cousin of the Goblin Scout. Uses neither shield nor defensive stance; built to punish poorly protected backlines (Mage and Archer) by crossing bridges or flanking.
+- **Attributes / Profile**: `moveRange: 4`, `attackRange: 1`, `attackKind: 'melee'` (`str: 7`, granting `+1` offensive bonus -> `attackPower = 3`, `baseArmor: 0`).
+- **Deterministic AI**:
+  1. **Priority target** (`stalkerScore(target)`): ranks living heroes by lowest current `hp`; on ties, lowest `totalDefense` (`baseArmor + fortitudeResistance(fort)`); on ties, lowest Manhattan distance; on ties, list order.
+  2. **If heroes are already in range (`inRange.length > 0`)**: attacks the one with lowest `stalkerScore` (if any hit is lethal according to `computeDamage`, picks the killable target with highest potential `attackPower` first).
+  3. **If out of range and `!hasMoved`**: searches all reachable cells with an available attack (`firingCells`, within `moveRange` if possible, otherwise all reachable via BFS) for the one attacking the hero with lowest `stalkerScore`, breaking ties by fewest steps and then by cells with **fewer other adjacent heroes** (tends to avoid getting surrounded by Knight+Cleric when flanking room exists). If no attack cell is reachable on the map, moves closer to the hero with lowest `stalkerScore`.
 
-### 3.2 `skeleton-shieldbearer` — Escudeiro Esqueleto (Tanque Defensivo)
+### 3.2 `skeleton-shieldbearer` — Skeleton Shieldbearer (Defensive Tank)
 
-- **Identidade**: Vanguarda disciplinada que segura gargalos (`fortress`, `corrupted-sanctuary`) usando a postura **Defender (`-50%` dano)** para proteger arqueiros, acólitos e o chefe atrás dele.
-- **Atributos / Perfil**: `moveRange: 2`, `attackRange: 1`, `attackKind: 'melee'`, `baseArmor: 1`, `fort: 6` (`maxHp: 11`), `basePower: 2`.
-- **IA Determinística**:
-  1. **Quando há herói adjacente (`inRange.length > 0`)**:
-     - Se algum golpe básico mata um alvo adjacente (`computeDamage >= target.hp`), **ataca** esse alvo imediatamente (`{ type: 'attack', target }`).
-     - Senão, se `!enemy.isGuarding` **E** (`enemy.hp <= Math.floor(enemy.maxHp * 0.5)` **OU** `inRange.length >= 2`), usa **Defender** (`{ type: 'defend' }`).
-     - Caso contrário, **ataca** o herói adjacente mais próximo (empate: menor `hp`).
-  2. **Quando não há herói adjacente (`inRange.length === 0`)**:
-     - Se `!enemy.hasMoved`: avança até `moveRange` buscando células de ataque que engajem o máximo de heróis (como `armored-skeleton`, preferindo ficar entre heróis e aliados à distância quando empatado).
-     - Se `!enemy.hasMoved` não tem caminho ou já moveu (`enemy.hasMoved === true`) e continua sem alvo adjacente: se houver algum herói vivo a distância Manhattan `<= 4` e `!enemy.isGuarding`, usa **Defender** (`{ type: 'defend' }`) para absorver tiros de Arqueira/Mago na rodada seguinte; caso contrário retorna `null`.
+- **Identity**: Disciplined vanguard that holds chokepoints (`fortress`, `corrupted-sanctuary`) using the **Defend (`-50%` damage)** stance to shield archers, acolytes, and the boss behind it.
+- **Attributes / Profile**: `moveRange: 2`, `attackRange: 1`, `attackKind: 'melee'`, `baseArmor: 1`, `fort: 6` (`maxHp: 11`), `basePower: 2`.
+- **Deterministic AI**:
+  1. **When a hero is adjacent (`inRange.length > 0`)**:
+     - If any basic attack kills an adjacent target (`computeDamage >= target.hp`), **attacks** that target immediately (`{ type: 'attack', target }`).
+     - Else, if `!enemy.isGuarding` **AND** (`enemy.hp <= Math.floor(enemy.maxHp * 0.5)` **OR** `inRange.length >= 2`), uses **Defend** (`{ type: 'defend' }`).
+     - Otherwise, **attacks** the nearest adjacent hero (tie-breaker: lowest `hp`).
+  2. **When no hero is adjacent (`inRange.length === 0`)**:
+     - If `!enemy.hasMoved`: advances up to `moveRange` seeking attack cells that engage as many heroes as possible (like `armored-skeleton`, preferring to stand between heroes and allied ranged units on ties).
+     - If `!enemy.hasMoved` has no path or it has already moved (`enemy.hasMoved === true`) and still has no adjacent target: if any living hero is within Manhattan distance `<= 4` and `!enemy.isGuarding`, uses **Defend** (`{ type: 'defend' }`) to soak Archer/Mage shots next turn; otherwise returns `null`.
 
-### 3.3 `necromancer-acolyte` — Acólito Necromante (Suporte Sombrio e Magia)
+### 3.3 `necromancer-acolyte` — Necromancer Acolyte (Dark Support & Magic)
 
-- **Identidade**: Conjurador sombrio de retaguarda que sustenta a linha de frente morta-viva com a habilidade **`dark-mend`** (cura mágica escalada por `int`) e dispara rajadas arcanas sombrias quando nenhum aliado precisa de cura.
-- **Atributos / Perfil**: `moveRange: 2`, `attackRange: 3`, `attackKind: 'magic'`, `int: 7` (`+1` bônus), `basePower: 2` (`attackPower = 3`), `skillId: 'dark-mend'` (`heal: 2` → cura total `2 + 1 = 3 HP`, `range: 3`, `cooldown: 2`, `targetTeam: 'ally'`).
-- **IA Determinística**:
-  1. **Prioridade 1 — Cura (`dark-mend`)**:
-     - Só considera curar se `enemy.skillCooldown === 0` e existir algum aliado inimigo vivo com `hp < maxHp` e `hp <= Math.floor(maxHp * 0.75)` (ou o chefe `ashen-guardian` abaixo de `maxHp`).
-     - Ordena candidatos à cura por: (a) ser chefe (`ashen-guardian`) antes dos demais; (b) menor razão `hp / maxHp`; (c) menor distância até o acólito; (d) ordem da lista.
-     - Se o alvo prioritário está dentro de `range 3` e com LoS da posição atual, retorna `{ type: 'skill', skillId: 'dark-mend', targetCell: ally.pos }`.
-     - Se ainda `!enemy.hasMoved` e há célula dentro de `moveRange` de onde a cura alcança o aliado ferido (preferindo a célula mais distante dos heróis `distanceToNearest >= 2`), move-se para lá.
-  2. **Prioridade 2 — Ataque Mágico Básico**:
-     - Se não há alvo elegível de cura (ou `skillCooldown > 0`), comporta-se como `cultist-mage`: dispara magia (`attackRange: 3`, LoS) no herói de menor `hp` ao alcance; se fora de alcance e `!hasMoved`, busca célula com LoS mantendo distância segura `>= 2`.
+- **Identity**: Backline dark caster that sustains the undead frontline with **`dark-mend`** (`int`-scaled magical heal) and fires dark arcane bolts when no ally needs healing.
+- **Attributes / Profile**: `moveRange: 2`, `attackRange: 3`, `attackKind: 'magic'`, `int: 7` (`+1` bonus), `basePower: 2` (`attackPower = 3`), `skillId: 'dark-mend'` (`heal: 2` → total heal `2 + 1 = 3 HP`, `range: 3`, `cooldown: 2`, `targetTeam: 'ally'`).
+- **Deterministic AI**:
+  1. **Priority 1 — Heal (`dark-mend`)**:
+     - Only considers healing if `enemy.skillCooldown === 0` and there is a living allied enemy with `hp < maxHp` and `hp <= Math.floor(maxHp * 0.75)` (or the boss `ashen-guardian` below `maxHp`).
+     - Ranks healing candidates by: (a) boss (`ashen-guardian`) before all others; (b) lowest `hp / maxHp` ratio; (c) shortest distance to the acolyte; (d) list order.
+     - If the priority target is within `range 3` and has LoS from the current position, returns `{ type: 'skill', skillId: 'dark-mend', targetCell: ally.pos }`.
+     - If `!enemy.hasMoved` and there is a cell within `moveRange` from which the heal reaches the wounded ally (preferring the cell farthest from heroes `distanceToNearest >= 2`), moves there.
+  2. **Priority 2 — Basic Magic Attack**:
+     - If there is no eligible healing target (or `skillCooldown > 0`), behaves like `cultist-mage`: fires magic (`attackRange: 3`, LoS) at the lowest-`hp` hero in range; if out of range and `!hasMoved`, seeks a cell with LoS keeping safe distance `>= 2`.
 
 ---
 
-## 4. Chefe da Fase 5: `ashen-guardian` — Guardião das Cinzas
+## 4. Stage 5 Boss: `ashen-guardian` — Ashen Guardian
 
-### 4.1 Conceito e Mecânica de 2 Fases
+### 4.1 Concept and Two-Phase Mechanics
 
-- **Identidade**: Senhor corrompido do Santuário, imponente e metódico. Combina golpes corpo a corpo devastadores com ataques de área telegrafados (`PendingAttack`), forçando o time do jogador a alternar reposicionamento, foco de dano e `Defend`.
-- **Estado de Fase (`bossPhase: 1 | 2`)**:
-  - Inicia a batalha com `bossPhase = 1`.
-  - **Gatilho da Fase 2**: imediatamente quando seu HP cai para **`<= Math.floor(maxHp * 0.5)`** (`<= 14 HP` de `28 HP` máximos) e continua vivo (`alive === true`).
-  - **Regra obrigatória**: **não restaura nenhum ponto de HP na transição**.
-  - A transição é uma **trava irreversível** (*one-way latch*): `bossPhase` muda de `1` para `2`, `moveRange` sobe de `2` para `3` e o motor emite `{ type: 'bossPhaseChanged', unitId: boss.id, phase: 2, newMoveRange: 3 }`. Mesmo se o `necromancer-acolyte` curar o chefe acima de 50% depois, o chefe **permanece** em Fase 2 e o evento não repete.
-  - Um `PendingAttack` já preparado na Fase 1 **preserva** suas `targetCells` originais até resolver ou o chefe morrer.
+- **Identity**: Corrupted lord of the Sanctuary, imposing and methodical. Combines devastating melee strikes with telegraphed area attacks (`PendingAttack`), forcing the player's squad to alternate repositioning, focused damage, and `Defend`.
+- **Phase State (`bossPhase: 1 | 2`)**:
+  - Starts the battle with `bossPhase = 1`.
+  - **Phase 2 Trigger**: immediately when its HP drops to **`<= Math.floor(maxHp * 0.5)`** (`<= 14 HP` out of `28` max HP) while still alive (`alive === true`).
+  - **Mandatory rule**: **restores zero HP on transition**.
+  - The transition is an **irreversible one-way latch**: `bossPhase` changes from `1` to `2`, `moveRange` increases from `2` to `3`, and the engine emits `{ type: 'bossPhaseChanged', unitId: boss.id, phase: 2, newMoveRange: 3 }`. Even if `necromancer-acolyte` heals the boss back above 50% later, the boss **stays** in Phase 2 and the event never fires again.
+  - A `PendingAttack` already prepared during Phase 1 **keeps** its original `targetCells` until resolved or the boss dies.
 
-### 4.2 Perfil Comparativo das Fases do Chefe
+### 4.2 Boss Phase Comparison Table
 
-| Aspecto | Fase 1 (`hp > 50% maxHp`) | Fase 2 — Fúria das Cinzas (`hp <= 50% maxHp`) |
+| Aspect | Phase 1 (`hp > 50% maxHp`) | Phase 2 — Ashen Fury (`hp <= 50% maxHp`) |
 |---|---|---|
 | `moveRange` | `2` | **`3`** (`+1`) |
-| Ataque básico | `melee` (`str: 7`, `basePower: 4` → **`5` ATK**) | Mesmo (`melee`, `5` ATK) |
-| Ataque Anunciado | **`Golpe das Cinzas`** | **`Erupção das Cinzas`** |
-| Forma das `targetCells` | **Cruz de 5 células** (centro + 4 ortogonais dentro da grade) | **Área `3×3` (até 9 células)** (centro + 8 adjacentes ortogonais e diagonais dentro da grade) |
-| Alcance de centro | Até `3` células (Manhattan) do chefe | Até `3` células (Manhattan) do chefe |
-| Potência / Tipo | `basePower: 4`, `attackKind: 'magic'` (`int: 7` → **`5` ATK**) | `basePower: 5`, `attackKind: 'magic'` (`int: 7` → **`6` ATK**) |
-| Recarga (`cooldown`) | `2` rodadas | `2` rodadas |
+| Basic attack | `melee` (`str: 7`, `basePower: 4` → **`5` ATK**) | Same (`melee`, `5` ATK) |
+| Telegraphed Attack | **`Ashen Slam`** | **`Ashen Eruption`** |
+| Shape of `targetCells` | **5-cell cross** (center + 4 orthogonal cells in bounds) | **`3×3` area (up to 9 cells)** (center + 8 orthogonal and diagonal neighbors in bounds) |
+| Center cast range | Up to `3` cells (Manhattan) from boss | Up to `3` cells (Manhattan) from boss |
+| Power / Type | `basePower: 4`, `attackKind: 'magic'` (`int: 7` → **`5` ATK**) | `basePower: 5`, `attackKind: 'magic'` (`int: 7` → **`6` ATK**) |
+| Cooldown | `2` rounds | `2` rounds |
 
-### 4.3 Árvore de Decisão Determinística do Chefe
+### 4.3 Boss Deterministic Decision Tree
 
-Em cada chamada de `executeNextEnemyAction()` durante a ativação do `ashen-guardian` (lembrando que qualquer `PendingAttack` preparado no turno anterior já foi resolvido no início da ativação atual):
+On each call to `executeNextEnemyAction()` during `ashen-guardian`'s activation (noting that any `PendingAttack` prepared on the previous turn has already been resolved at the start of the current activation):
 
-1. **Se ainda não agiu (`!hasAttacked`) e `skillCooldown === 0`**:
-   - Avalia todas as células livres ou ocupadas dentro da grade a distância Manhattan `<= 3` da posição atual do chefe (excluindo células de obstáculo sólido `wall`/`pillar` como centro? Melhor: qualquer célula válida da grade `isInBounds`, filtrando obstáculos das `targetCells` afetadas apenas se desejado — como obstáculos não têm unidades, manter `inBounds` é limpo e simples; ou centrar apenas em células sem obstáculo que atinjam **pelo menos 1 herói vivo**).
-   - Para cada célula candidata de centro `c`: calcula `area = getBossAttackArea(c, bossPhase)` (`cross` na Fase 1, `3×3` na Fase 2) e conta `hits = livingHeroes.filter(h => area.some(a => sameCell(a, h.pos)))`.
-   - Se existe pelo menos uma célula com `hits.length >= 1`:
-     - Escolhe a célula que maximiza `hits.length`; no empate, menor soma de HP dos heróis atingidos; no empate, menor distância Manhattan até o chefe; no empate, menor `y`, depois menor `x`.
-     - Retorna `{ type: 'prepareAttack', skillName, targetCells: area, basePower, attackKind: 'magic', cooldown: 2 }`.
-     - *(Nota: como `prepareAttack` consome `hasAttacked = true`, se o chefe ainda não moveu, ele encerra a preparação parado? Não — na V4, se a IA decidir preparar antes de mover, para evitar que o chefe se afaste de forma estranha depois de telegrafar, estabelecemos que o chefe **move primeiro se estiver fora de alcance de ataque básico e sem bom alvo de preparação**, ou prepara de onde está e **não move depois de preparar**, encerrando a ativação ou mantendo `hasMoved = true`! Regra mais limpa para `EnemyAI`: se existe herói adjacente (`manhattan === 1`) OU preparação atinge `>= 1` herói de onde está, prepara sem precisar andar; na segunda chamada de `executeNextEnemyAction()`, se o chefe já preparou um `PendingAttack` neste turno, não precisa fugir — retorna `null` e encerra a ativação!)*
-2. **Se `skillCooldown > 0` (ou nenhum herói ao alcance de preparação)**:
-   - Se há herói adjacente (`attackRange: 1`), retorna `{ type: 'attack', target }` no herói adjacente de menor `hp` (empate: quem pode ser morto por `computeDamage`, depois ordem da lista).
-   - Senão, se `!hasMoved`, move-se até `moveRange` (`2` na Fase 1, `3` na Fase 2) pelo menor caminho até o herói vivo mais próximo (ou até ficar dentro de alcance `3` quando `skillCooldown === 0` para preparar o ataque anunciado logo em seguida!).
+1. **If it has not acted yet (`!hasAttacked`) and `skillCooldown === 0`**:
+   - Evaluates all valid grid cells (`isInBounds`, free or occupied) within Manhattan distance `<= 3` of the boss's current position (centering on obstacle-free cells that hit **at least 1 living hero**).
+   - For each candidate center cell `c`: computes `area = getBossAttackArea(c, bossPhase)` (`cross` in Phase 1, `3×3` in Phase 2) and counts `hits = livingHeroes.filter(h => area.some(a => sameCell(a, h.pos)))`.
+   - If at least one cell has `hits.length >= 1`:
+     - Picks the cell maximizing `hits.length`; on ties, lowest sum of hit heroes' HP; on ties, shortest Manhattan distance to the boss; on ties, smallest `y`, then smallest `x`.
+     - Returns `{ type: 'prepareAttack', skillName, targetCells: area, basePower, attackKind: 'magic', cooldown: 2 }`.
+     - *(Note: since `prepareAttack` consumes `hasAttacked = true`, to avoid the boss awkwardly walking away after telegraphing, the rule in `EnemyAI` is: if a hero is adjacent (`manhattan === 1`) OR preparing hits `>= 1` hero from where it stands, it prepares without needing to move first; on the second `executeNextEnemyAction()` call, if the boss has already prepared a `PendingAttack` this turn, it does not need to flee — it returns `null` and ends its activation!)*
+2. **If `skillCooldown > 0` (or no hero is within preparation range)**:
+   - If a hero is adjacent (`attackRange: 1`), returns `{ type: 'attack', target }` targeting the adjacent hero with lowest `hp` (tie-breaker: killable via `computeDamage`, then list order).
+   - Otherwise, if `!hasMoved`, moves up to `moveRange` (`2` in Phase 1, `3` in Phase 2) along the shortest path toward the nearest living hero (or into range `3` when `skillCooldown === 0` so it can immediately prepare the telegraphed attack next!).
 
 ---
 
-## 5. Reutilização dos Modelos `.glb` KayKit CC0 Existentes
+## 5. Reuse of Existing KayKit CC0 `.glb` Models
 
-Abaixo está o mapeamento completo em `src/rendering/CharacterVisualController.ts` (`MODEL_SPECS`) e `src/rendering/UnitRenderer.ts`, utilizando exclusivamente os 8 arquivos `.glb` já presentes em `public/assets/models/`:
+Below is the complete mapping in `src/rendering/CharacterVisualController.ts` (`MODEL_SPECS`) and `src/rendering/UnitRenderer.ts`, using exclusively the 8 `.glb` files already in `public/assets/models/`:
 
-### Unidades Existentes (Preservadas)
+### Existing Units (Preserved)
 
-| `UnitType` | Arquivo `.glb` | `targetHeight` | Tint (`tintHex` / `tintStrength`) |
+| `UnitType` | `.glb` File | `targetHeight` | Tint (`tintHex` / `tintStrength`) |
 |---|---|---|---|
 | `knight` | `Knight.glb` | `1.02` | — |
 | `archer` | `Rogue_Hooded.glb` | `0.98` | — |
@@ -133,13 +133,13 @@ Abaixo está o mapeamento completo em `src/rendering/CharacterVisualController.t
 | `cultist-mage` | `Skeleton_Mage.glb` | `1.02` | — |
 | `goblin-scout` | `Rogue.glb` | `0.82` | `0x6b8e23` / `0.55` |
 
-### Novas Unidades V4 (Reuso com Tint, Altura e Silhueta Distinta)
+### New V4 Units (Reused with Tint, Height, and Distinct Silhouette)
 
-| `UnitType` | Arquivo `.glb` reutilizado | `targetHeight` | `tintHex` | `tintStrength` | Diferenciação visual e silhueta |
+| `UnitType` | Reused `.glb` File | `targetHeight` | `tintHex` | `tintStrength` | Visual Differentiation & Silhouette |
 |---|---|---|---|---|---|
-| `goblin-stalker` | `/assets/models/Rogue_Hooded.glb` | `0.88` | `0x365314` (oliva sombrio) | `0.65` | Capuz pontudo distinto do `goblin-scout` (`Rogue.glb` sem capuz), estatura agachada menor que a `archer` (`0.98`), verde-musgo escuro + anel vermelho inimigo. |
-| `skeleton-shieldbearer` | `/assets/models/Skeleton_Warrior.glb` | `1.04` | `0x64748b` (ferro ardósia frio) | `0.50` | Menor que o `armored-skeleton` (`1.16`), tom metálico ardósia contrastando com ferro escuro/bronze; quando `isGuarding === true`, ativa o anel pulsante de defesa e badge `🛡`. |
-| `necromancer-acolyte` | `/assets/models/Skeleton_Mage.glb` | `1.00` | `0x0d9488` (esmeralda necrótico) | `0.55` | Contrasta imediatamente com o manto vinho do `cultist-mage` e com o púrpura do `mage` aliado; efeito verde-espectral ao lançar `dark-mend`. |
-| `ashen-guardian` | `/assets/models/Skeleton_Warrior.glb` | `1.42` | `0x7f1d1d` (cinza-carvão & brasa carmim) | `0.55` | ~40% mais alto que heróis padrão (`1.42` vs `1.02`), hitbox `0.85 × 1.55 × 0.85`, barra de HP com destaque de chefe (`👑`), aura de brasa intensa (`0xf97316`) ativada ao entrar na Fase 2 (`bossPhase === 2`). |
+| `goblin-stalker` | `/assets/models/Rogue_Hooded.glb` | `0.88` | `0x365314` (dark olive) | `0.65` | Pointed hood distinct from `goblin-scout` (unhooded `Rogue.glb`), crouched stature shorter than `archer` (`0.98`), dark moss-green + red enemy ring. |
+| `skeleton-shieldbearer` | `/assets/models/Skeleton_Warrior.glb` | `1.04` | `0x64748b` (cold slate iron) | `0.50` | Shorter than `armored-skeleton` (`1.16`), slate metallic tone contrasting against dark iron/bronze; when `isGuarding === true`, activates the pulsing defense ring and `🛡` badge. |
+| `necromancer-acolyte` | `/assets/models/Skeleton_Mage.glb` | `1.00` | `0x0d9488` (necrotic emerald) | `0.55` | Immediately contrasts with `cultist-mage`'s crimson robe and the allied `mage`'s purple; spectral green VFX when casting `dark-mend`. |
+| `ashen-guardian` | `/assets/models/Skeleton_Warrior.glb` | `1.42` | `0x7f1d1d` (charcoal ash & crimson ember) | `0.55` | ~40% taller than standard heroes (`1.42` vs `1.02`), hitbox `0.85 × 1.55 × 0.85`, boss-accented HP bar (`👑`), intense ember aura (`0xf97316`) activated upon entering Phase 2 (`bossPhase === 2`). |
 
-*(Para o fallback procedural em `UnitRenderer.ts` — caso um `.glb` falhe ao carregar — cada novo tipo recebe um construtor procedural simples reaproveitando as primitivas existentes com as cores/alturas acima, e um escudo frontal destacado no `skeleton-shieldbearer` e ombreiras/coroa de brasas no `ashen-guardian`.)*
+*(For the procedural fallback in `UnitRenderer.ts` — should a `.glb` fail to load — each new unit type gets a simple procedural builder reusing existing primitives with the colors/heights above, plus a prominent front shield on `skeleton-shieldbearer` and ember pauldrons/crown on `ashen-guardian`.)*

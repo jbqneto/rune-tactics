@@ -7,7 +7,7 @@ import {
 } from '../attributes/AttributeSystem';
 import { GridSystem, manhattan, sameCell } from '../grid/GridSystem';
 
-/** De `from`, dá para acertar `to` com esse alcance? Acima de 1, exige linha de visão. */
+/** Can `to` be reached from `from` with this range? Above 1, requires line of sight. */
 export function canReach(from: GridCoord, to: GridCoord, range: number, grid: GridSystem): boolean {
   return manhattan(from, to) <= range && (range <= 1 || grid.hasLineOfSight(from, to));
 }
@@ -23,11 +23,11 @@ export function canAttack(attacker: UnitState, target: UnitState, grid: GridSyst
 }
 
 /**
- * Fórmula centralizada de dano da V4:
+ * Centralized V4 damage formula:
  * `attackPower = basePower + offensiveBonus(mainAttr)`
  * `totalDefense = target.baseArmor + fortitudeResistance(target.attributes.fort)`
  * `damageBeforeGuard = max(1, attackPower - totalDefense)`
- * Se `target.isGuarding`, reduz em 50% arredondado para cima, com piso 1.
+ * If `target.isGuarding`, reduced by 50% rounded up, with a minimum floor of 1.
  */
 export function computeDamage(
   attacker: Pick<UnitState, 'attributes'>,
@@ -42,7 +42,7 @@ export function computeDamage(
   return target.isGuarding ? Math.max(1, Math.ceil(damageBeforeGuard * 0.5)) : damageBeforeGuard;
 }
 
-/** Calcula e aplica dano ao alvo, devolvendo `unitAttacked` e, se ele morreu, `unitDied` (ou `bossPhaseChanged`). */
+/** Computes and applies damage to target, returning `unitAttacked` and, if killed, `unitDied` (or `bossPhaseChanged`). */
 function applyDamage(
   attacker: UnitState,
   target: UnitState,
@@ -85,14 +85,14 @@ function applyDamage(
   return events;
 }
 
-/** Ativa a postura defensiva unificada (50% de mitigação até a próxima ativação da própria unidade). */
+/** Activates unified defensive stance (50% mitigation until the unit's next activation). */
 export function resolveDefend(unit: UnitState): GameEvent[] {
   unit.hasAttacked = true;
   unit.isGuarding = true;
   return [{ type: 'unitGuarded', unitId: unit.id }];
 }
 
-/** Aplica o ataque básico nas duas unidades. Quem chama valida antes com `canAttack`. */
+/** Applies basic attack between two units. Caller validates beforehand with `canAttack`. */
 export function resolveAttack(attacker: UnitState, target: UnitState): GameEvent[] {
   attacker.hasAttacked = true;
   return applyDamage(attacker, target, attacker.basePower, attacker.attackKind, {
@@ -104,14 +104,14 @@ export function getSkill(unit: UnitState): SkillDef | null {
   return unit.skillId ? SKILLS[unit.skillId] : null;
 }
 
-/** Células atingidas pela habilidade lançada em `targetCell`, dentro da grade. */
+/** Cells hit by the skill cast at `targetCell`, within the grid. */
 export function getSkillAreaCells(skill: SkillDef, targetCell: GridCoord, grid: GridSystem): GridCoord[] {
   if (!grid.isInBounds(targetCell)) return [];
   const center = { x: targetCell.x, y: targetCell.y };
   return skill.area === 'cross' ? [center, ...grid.getNeighbors(center)] : [center];
 }
 
-/** Alvos válidos para a habilidade na área: inimigos vivos (para dano) ou aliados vivos feridos (para cura). */
+/** Valid targets for the skill in the area: living enemies (for damage) or injured living allies (for healing). */
 function getSkillAffectedUnits(
   caster: UnitState,
   skill: SkillDef,
@@ -128,7 +128,7 @@ function getSkillAffectedUnits(
   return units.filter((u) => u.alive && u.team !== caster.team && area.some((c) => sameCell(c, u.pos)));
 }
 
-/** A célula é um alvo válido: ao alcance, com linha de visão se preciso, e com algum alvo válido na área. */
+/** Whether the cell is a valid target: in range, with line of sight if needed, and hitting at least one valid unit. */
 export function isValidSkillTarget(
   caster: UnitState,
   skill: SkillDef,
@@ -144,7 +144,7 @@ export function isValidSkillTarget(
   );
 }
 
-/** Células onde a unidade pode lançar a habilidade agora. */
+/** Cells where the unit can cast its skill right now. */
 export function getSkillTargetCells(caster: UnitState, units: readonly UnitState[], grid: GridSystem): GridCoord[] {
   const skill = getSkill(caster);
   if (!skill || !caster.alive || caster.hasAttacked || caster.skillCooldown > 0) return [];
@@ -157,7 +157,7 @@ export function getSkillTargetCells(caster: UnitState, units: readonly UnitState
   return cells;
 }
 
-/** Aplica a habilidade. Quem chama valida antes com `isValidSkillTarget`. */
+/** Applies the skill. Caller validates beforehand with `isValidSkillTarget`. */
 export function resolveSkill(
   caster: UnitState,
   skill: SkillDef,
@@ -205,7 +205,7 @@ export function resolveSkill(
   ];
 }
 
-/** Resolve um ataque anunciado (`PendingAttack`) no início da próxima ativação do conjurador vivo. */
+/** Resolves a telegraphed attack (`PendingAttack`) at the start of the living caster's next activation. */
 export function resolvePendingAttack(
   pending: PendingAttack,
   caster: UnitState,

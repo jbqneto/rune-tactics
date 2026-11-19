@@ -1,391 +1,395 @@
-# Design system da interface
+# UI Design System
 
-Este documento define os tokens, os componentes e o layout do HUD da V3 visual. O clima vem de `references/ref-v3.png`; as cores e a tipografia base vêm de `art-direction.md`. Ele descreve o alvo: `src/style.css` e `src/ui/HudManager.ts` ainda não o seguem.
+This document defines the tokens, components, and layout for the V3 visual HUD. The mood comes from `references/ref-v3.png`; base colors and typography come from `art-direction.md`. It describes the target: `src/style.css` and `src/ui/HudManager.ts` do not follow it yet at the time of writing.
 
-O HUD só apresenta o estado do motor. Ele não decide regras: todo rótulo, contagem e estado de botão sai do `GameStateSnapshot`.
+The HUD only presents engine state. It never decides rules: every label, count, and button state comes from `GameStateSnapshot`.
 
-## Estado atual
+## Current State
 
-- `src/style.css` não tem variáveis: cerca de 25 cores e uma dúzia de tamanhos estão escritos direto nas regras.
-- A fonte é a do sistema.
-- Não existe barra de ordem de turno.
-- O painel de aliados, o card da unidade, a barra de ações e o painel do canto superior direito já existem e são reaproveitados com o visual novo.
-- O botão de desfazer movimento não tem ícone.
+- `src/style.css` has no CSS variables: roughly 25 colors and a dozen sizes are hardcoded directly in rules.
+- System fonts are used.
+- There is no turn-order bar.
+- The allies panel, active unit card, action bar, and top-right status panel already exist and are reused under the new visual style.
+- The undo move button has no icon.
 
-A migração começa por criar os tokens abaixo em `:root` e trocar os valores fixos por eles, sem mudar o layout. O layout novo vem depois.
+Migration starts by creating the tokens below in `:root` and replacing hardcoded values with them without changing layout. The new layout follows afterward.
 
 ## Tokens
 
-### Cor
+### Color
 
-| Token | Valor | Uso |
+| Token | Value | Usage |
 |---|---|---|
-| `--color-bg` | `#0f172a` | fundo da página |
-| `--color-surface` | `rgba(15, 23, 42, 0.86)` | painéis |
-| `--color-surface-raised` | `rgba(30, 41, 59, 0.92)` | botões, itens de lista |
-| `--color-surface-hover` | `rgba(51, 65, 85, 0.95)` | item sob o cursor |
-| `--color-border` | `rgba(148, 163, 184, 0.35)` | borda neutra |
-| `--color-border-strong` | `rgba(203, 166, 98, 0.45)` | borda de painel, ouro velho |
-| `--color-text` | `#f8fafc` | texto principal |
-| `--color-text-muted` | `#94a3b8` | rótulos, texto secundário |
-| `--color-text-disabled` | `#64748b` | texto desabilitado |
-| `--color-gold` | `#facc15` | unidade ativa, ação principal |
-| `--color-gold-soft` | `#cba662` | filetes e títulos |
-| `--color-player` | `#3b82f6` | time do jogador, movimento |
-| `--color-player-soft` | `#60a5fa` | realce do jogador |
-| `--color-enemy` | `#ef4444` | time inimigo, ataque |
-| `--color-enemy-soft` | `#f87171` | realce inimigo |
-| `--color-skill` | `#a855f7` | habilidade |
-| `--color-skill-soft` | `#c084fc` | realce de habilidade |
-| `--color-heal` | `#4ade80` | cura, HP aliado |
-| `--color-hp-low` | `#f59e0b` | HP abaixo de 35% |
-| `--color-success` | `#22c55e` | vitória, confirmação |
-| `--color-danger` | `#ef4444` | derrota, erro |
-| `--color-overlay` | `rgba(9, 13, 20, 0.72)` | fundo de modal |
-| `--color-focus` | `#93c5fd` | anel de foco do teclado |
+| `--color-bg` | `#0f172a` | page background |
+| `--color-surface` | `rgba(15, 23, 42, 0.86)` | panels |
+| `--color-surface-raised` | `rgba(30, 41, 59, 0.92)` | buttons, list items |
+| `--color-surface-hover` | `rgba(51, 65, 85, 0.95)` | hovered item |
+| `--color-border` | `rgba(148, 163, 184, 0.35)` | neutral border |
+| `--color-border-strong` | `rgba(203, 166, 98, 0.45)` | panel border, antique gold |
+| `--color-text` | `#f8fafc` | primary text |
+| `--color-text-muted` | `#94a3b8` | labels, secondary text |
+| `--color-text-disabled` | `#64748b` | disabled text |
+| `--color-gold` | `#facc15` | active unit, primary action |
+| `--color-gold-soft` | `#cba662` | hairlines and titles |
+| `--color-player` | `#3b82f6` | player team, movement |
+| `--color-player-soft` | `#60a5fa` | player highlight |
+| `--color-enemy` | `#ef4444` | enemy team, attack |
+| `--color-enemy-soft` | `#f87171` | enemy highlight |
+| `--color-skill` | `#a855f7` | skill |
+| `--color-skill-soft` | `#c084fc` | skill highlight |
+| `--color-heal` | `#4ade80` | healing, ally HP |
+| `--color-hp-low` | `#f59e0b` | HP below 35% |
+| `--color-success` | `#22c55e` | victory, confirm |
+| `--color-danger` | `#ef4444` | defeat, error |
+| `--color-overlay` | `rgba(9, 13, 20, 0.72)` | modal backdrop |
+| `--color-focus` | `#93c5fd` | keyboard focus ring |
 
-Cores de classe, usadas na moldura do retrato e no acento do card:
+Class colors, used on portrait frames and card accents:
 
-| Token | Valor |
+| Token | Value |
 |---|---|
 | `--color-class-knight` | `#3b82f6` |
 | `--color-class-archer` | `#22c55e` |
 | `--color-class-mage` | `#a855f7` |
 | `--color-class-cleric` | `#eab308` |
 
-### Tipografia
+### Typography
 
-| Token | Valor |
+| Token | Value |
 |---|---|
 | `--font-display` | `'Cinzel', Georgia, serif` |
 | `--font-ui` | `'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif` |
 
-| Token | Tamanho e altura de linha | Peso | Uso |
+| Token | Size / Line Height | Weight | Usage |
 |---|---|---|---|
-| `--text-display` | 28 / 34 px | 700 | título do resultado |
-| `--text-title` | 18 / 24 px | 700 | nome do jogo, nome do mapa |
-| `--text-heading` | 14 / 20 px | 600 | nome da unidade, título de painel |
-| `--text-body` | 13 / 18 px | 500 | botões, texto corrido |
-| `--text-label` | 12 / 16 px | 500 | rótulos, valores secundários |
-| `--text-caption` | 11 / 14 px | 600 | badges, contadores |
+| `--text-display` | 28 / 34 px | 700 | result title |
+| `--text-title` | 18 / 24 px | 700 | game title, map name |
+| `--text-heading` | 14 / 20 px | 600 | unit name, panel title |
+| `--text-body` | 13 / 18 px | 500 | buttons, body copy |
+| `--text-label` | 12 / 16 px | 500 | labels, secondary values |
+| `--text-caption` | 11 / 14 px | 600 | badges, counters |
 
-- `--text-display`, `--text-title` e `--text-heading` usam `--font-display`. Os demais usam `--font-ui`.
-- Títulos de painel e badges em caixa alta, com espaçamento de 0,06 em.
-- Números com `font-variant-numeric: tabular-nums`.
-- O menor texto da interface tem 11 px.
+- `--text-display`, `--text-title`, and `--text-heading` use `--font-display`. Others use `--font-ui`.
+- Panel titles and badges are uppercase with `0.06em` letter spacing.
+- Numbers use `font-variant-numeric: tabular-nums`.
+- Minimum text size anywhere in the UI is 11 px.
 
-### Espaçamento
+### Spacing
 
-Base de 4 px.
+4 px base unit.
 
-| Token | Valor | Uso |
+| Token | Value | Usage |
 |---|---|---|
-| `--space-1` | 4 px | entre ícone e texto pequeno |
-| `--space-2` | 8 px | dentro de botões, entre itens de lista |
-| `--space-3` | 12 px | preenchimento de painel compacto |
-| `--space-4` | 16 px | preenchimento de painel, margem da tela |
-| `--space-5` | 24 px | entre grupos |
-| `--space-6` | 32 px | preenchimento de modal |
+| `--space-1` | 4 px | between icon and small text |
+| `--space-2` | 8 px | inside buttons, between list items |
+| `--space-3` | 12 px | compact panel padding |
+| `--space-4` | 16 px | panel padding, screen margin |
+| `--space-5` | 24 px | between groups |
+| `--space-6` | 32 px | modal padding |
 
-### Bordas, raios e sombras
+### Borders, Radii, and Shadows
 
-| Token | Valor | Uso |
+| Token | Value | Usage |
 |---|---|---|
-| `--radius-sm` | 4 px | badges, barras |
-| `--radius-md` | 8 px | painéis, botões |
+| `--radius-sm` | 4 px | badges, bars |
+| `--radius-md` | 8 px | panels, buttons |
 | `--radius-lg` | 12 px | modal |
-| `--radius-pill` | 999 px | contadores |
-| `--border-width` | 1 px | padrão |
-| `--border-width-strong` | 2 px | ativo, selecionado, foco |
-| `--shadow-panel` | `0 6px 20px rgba(0, 0, 0, 0.45)` | painéis |
-| `--shadow-raised` | `0 2px 6px rgba(0, 0, 0, 0.35)` | botões |
-| `--glow-gold` | `0 0 0 1px rgba(250, 204, 21, 0.6), 0 0 12px rgba(250, 204, 21, 0.35)` | unidade ativa |
-| `--glow-player` | `0 0 0 1px rgba(96, 165, 250, 0.5)` | modo de ação selecionado |
-| `--glow-skill` | `0 0 0 1px rgba(192, 132, 252, 0.5)` | modo de habilidade selecionado |
+| `--radius-pill` | 999 px | counters |
+| `--border-width` | 1 px | default |
+| `--border-width-strong` | 2 px | active, selected, focus |
+| `--shadow-panel` | `0 6px 20px rgba(0, 0, 0, 0.45)` | panels |
+| `--shadow-raised` | `0 2px 6px rgba(0, 0, 0, 0.35)` | buttons |
+| `--glow-gold` | `0 0 0 1px rgba(250, 204, 21, 0.6), 0 0 12px rgba(250, 204, 21, 0.35)` | active unit |
+| `--glow-player` | `0 0 0 1px rgba(96, 165, 250, 0.5)` | selected action mode |
+| `--glow-skill` | `0 0 0 1px rgba(192, 132, 252, 0.5)` | selected skill mode |
 
-### Movimento e camadas
+### Motion and Z-Layers
 
-| Token | Valor | Uso |
+| Token | Value | Usage |
 |---|---|---|
-| `--duration-fast` | 120 ms | hover, pressionar |
-| `--duration-base` | 180 ms | troca de estado, badges |
-| `--duration-slow` | 280 ms | entrada de modal e de aviso |
-| `--ease-standard` | `cubic-bezier(0.2, 0, 0, 1)` | todas as transições |
+| `--duration-fast` | 120 ms | hover, press |
+| `--duration-base` | 180 ms | state changes, badges |
+| `--duration-slow` | 280 ms | modal and toast entry |
+| `--ease-standard` | `cubic-bezier(0.2, 0, 0, 1)` | all transitions |
 
-| Token | Valor | Uso |
+| Token | Value | Usage |
 |---|---|---|
-| `--z-healthbars` | 1 | barras de HP sobre o tabuleiro |
-| `--z-hud` | 5 | painéis |
-| `--z-toast` | 8 | aviso de combate |
-| `--z-modal` | 10 | resultado da batalha |
+| `--z-healthbars` | 1 | HP bars over the board |
+| `--z-hud` | 5 | panels |
+| `--z-toast` | 8 | combat toast |
+| `--z-modal` | 10 | battle result |
 
-Com `prefers-reduced-motion`, as durações caem para zero e nada desliza nem pulsa.
+Under `prefers-reduced-motion`, durations drop to zero and nothing slides or pulses.
 
-## Estados
+## States
 
-Os mesmos estados valem para todo componente interativo.
+The same states apply to every interactive component.
 
-| Estado | Quando | Tratamento |
+| State | When | Treatment |
 |---|---|---|
-| padrão | repouso | superfície `--color-surface-raised`, borda `--color-border` |
-| `hover` | cursor sobre um elemento habilitado | superfície `--color-surface-hover`, borda na cor da função |
-| pressionado | durante o clique | desloca 1 px para baixo, sem sombra |
-| `selected` | modo de ação escolhido (mover, atacar, habilidade) | fundo tingido com a cor da função a 35%, borda forte, brilho correspondente |
-| `active` | a unidade que está em turno | borda dourada de 2 px e `--glow-gold` |
-| `disabled` | ação indisponível | opacidade 0,45, texto `--color-text-disabled`, cursor padrão, sem hover |
-| foco | navegação por teclado | anel de 2 px em `--color-focus`, afastado 2 px |
+| default | resting | `--color-surface-raised` surface, `--color-border` border |
+| `hover` | pointer over enabled element | `--color-surface-hover` surface, function-colored border |
+| pressed | during click | shifts 1 px down, no shadow |
+| `selected` | chosen action mode (move, attack, skill) | background tinted 35% with function color, strong border, matching glow |
+| `active` | currently acting unit | 2 px gold border and `--glow-gold` |
+| `disabled` | action unavailable | 0.45 opacity, `--color-text-disabled` text, default cursor, no hover |
+| focus | keyboard navigation | 2 px ring in `--color-focus`, 2 px offset |
 
-Regras:
+Rules:
 
-- `selected` é escolha do jogador; `active` é estado do jogo. Os dois nunca usam a mesma cor: `selected` usa a cor da função, `active` usa dourado.
-- `disabled` não muda de aparência com o cursor e não responde ao teclado.
-- Um botão desabilitado explica o motivo no `title`: "Já se moveu", "Em recarga: 2 rodadas", "Vez dos inimigos".
-- O estado nunca é comunicado só por cor: há sempre um rótulo, um ícone ou uma borda diferente.
+- `selected` is player choice; `active` is game state. The two never share the same color: `selected` uses function color, `active` uses gold.
+- `disabled` does not change appearance on hover and does not respond to keyboard input.
+- A disabled button explains why in its `title`: "Already moved", "On cooldown: 2 rounds", "Enemy turn".
+- State is never communicated by color alone: there is always a label, icon, or distinct border.
 
-## Componentes
+## Components
 
-### Painel
+### Panel
 
-Superfície `--color-surface`, borda `--border-width` em `--color-border-strong`, raio `--radius-md`, sombra `--shadow-panel`, preenchimento `--space-3` por `--space-4`, desfoque de fundo de 6 px. O título do painel usa `--text-caption` em `--color-gold-soft`, caixa alta.
+Surface `--color-surface`, border `--border-width` in `--color-border-strong`, radius `--radius-md`, shadow `--shadow-panel`, padding `--space-3` by `--space-4`, backdrop blur 6 px. Panel titles use `--text-caption` in `--color-gold-soft`, uppercase.
 
-### Retrato
+### Portrait
 
-| Tamanho | Lado | Uso |
+| Size | Side | Usage |
 |---|---|---|
-| pequeno | 28 px | lista de inimigos |
-| médio | 40 px | painel de aliados, ordem de turno |
-| grande | 72 px | card da unidade ativa |
+| small | 28 px | enemy list |
+| medium | 40 px | allies panel, turn order |
+| large | 72 px | active unit card |
 
-Quadrado, raio `--radius-sm`, borda de 2 px na cor do time: `--color-player` ou `--color-enemy`. O card da unidade ativa usa a cor da classe. Unidade ativa: borda dourada e `--glow-gold`. Unidade derrotada: imagem em tons de cinza a 50% de opacidade.
+Square, `--radius-sm`, 2 px border in team color: `--color-player` or `--color-enemy`. The active unit card uses class color. Active unit: gold border and `--glow-gold`. Defeated unit: greyscale image at 50% opacity.
 
-### Barra de HP
+### HP Bar
 
-Trilho de 6 px de altura, raio `--radius-sm`, fundo `rgba(0, 0, 0, 0.5)`. Preenchimento em `--color-heal` para aliados e `--color-enemy` para inimigos; abaixo de 35% do máximo, `--color-hp-low` para aliados. Ao lado, o valor `atual / máximo` em `--text-label`, com algarismos tabulares. A largura muda em `--duration-base`.
+6 px tall track, `--radius-sm`, background `rgba(0, 0, 0, 0.5)`. Fill in `--color-heal` for allies and `--color-enemy` for enemies; below 35% of max, `--color-hp-low` for allies. Next to it, `current / max` value in `--text-label` with tabular numerals. Width animates over `--duration-base`.
 
-### Badge de estado
+### Status Badge
 
-`--text-caption`, caixa alta, raio `--radius-sm`, preenchimento de 2 por 6 px.
+`--text-caption`, uppercase, `--radius-sm`, padding `2px 6px`.
 
-| Badge | Regra, nesta ordem | Cor |
+| Badge | Rule, in this order | Color |
 |---|---|---|
-| `DERROTADO` | a unidade não está viva | texto `--color-text-disabled`, fundo cinza escuro |
-| `EM TURNO` | o id é `activeUnitId` | texto escuro sobre `--color-gold` |
-| `CONCLUÍDO` | `hasActivatedThisRound` | texto `--color-text-muted`, borda `--color-border` |
-| `AGUARDANDO` | os demais casos | texto `--color-player-soft`, borda `--color-player` |
+| `DEFEATED` | unit is not alive | `--color-text-disabled` text, dark grey background |
+| `ACTING` | id matches `activeUnitId` | dark text over `--color-gold` |
+| `DONE` | `hasActivatedThisRound` | `--color-text-muted` text, `--color-border` border |
+| `WAITING` | all other cases | `--color-player-soft` text, `--color-player` border |
 
-O badge é derivado do snapshot a cada atualização. O HUD não guarda estado próprio.
+The badge is derived from the snapshot on every update. The HUD stores no state of its own.
 
-### Botão
+### Button
 
-Altura de 36 px, raio `--radius-md`, `--text-body` com peso 600.
+Height 36 px, `--radius-md`, `--text-body` weight 600.
 
-| Variante | Uso | Aparência |
+| Variant | Usage | Appearance |
 |---|---|---|
-| primário | "Jogar novamente" | fundo `--color-player`, texto branco |
-| secundário | "Reiniciar" | fundo `--color-surface-raised`, borda `--color-border` |
+| primary | "Play Again" | `--color-player` background, white text |
+| secondary | "Restart" | `--color-surface-raised` background, `--color-border` border |
 
-### Botão de ação
+### Action Button
 
-Usado na barra de ações. Ícone de 24 px e rótulo em `--text-body`; altura de 48 px; largura mínima de 96 px.
+Used in the action bar. 24 px icon and `--text-body` label; 48 px height; 96 px min width.
 
-| Ação | Ícone | Cor da função | Atalho |
+| Action | Icon | Function Color | Shortcut |
 |---|---|---|---|
-| Mover | bota | `--color-player` | — |
-| Atacar | espada | `--color-enemy` | — |
-| Habilidade | ícone da habilidade da unidade | `--color-skill`; `--color-heal` para cura | — |
-| Desfazer movimento | seta em curva | `--color-text-muted` | — |
-| Encerrar turno (E) | ampulheta | `--color-gold` | `E` |
+| Move | boot | `--color-player` | — |
+| Attack | sword | `--color-enemy` | — |
+| Skill | unit's skill icon | `--color-skill`; `--color-heal` for healing | — |
+| Undo Move | curved arrow | `--color-text-muted` | — |
+| End Turn (E) | hourglass | `--color-gold` | `E` |
 
-- O botão de habilidade mostra o nome da habilidade da unidade ativa. Em recarga, um contador circular no canto mostra as rodadas restantes.
-- O atalho aparece entre parênteses no rótulo e em `aria-keyshortcuts`.
-- "Encerrar turno (E)" fica separado dos outros por um espaço maior, para não ser clicado por engano.
+- The skill button displays the active unit's skill name. When on cooldown, a circular badge in the corner shows remaining rounds.
+- The shortcut appears in parentheses in the label and in `aria-keyshortcuts`.
+- "End Turn (E)" is separated from the others by a wider gap to prevent misclicks.
 
-### Item de ordem de turno
+### Turn Order Item
 
-Retrato médio com borda na cor do time. O item ativo é 20% maior, tem borda dourada, `--glow-gold` e um marcador triangular acima. Não é clicável e não tem estado de hover.
+Medium portrait with team-colored border. The active item is 20% larger, has a gold border, `--glow-gold`, and a triangular marker above. Not clickable and has no hover state.
 
-### Linha de estatística
+### Stat Row
 
-Rótulo em `--text-label` e `--color-text-muted`; valor em `--text-heading` com algarismos tabulares. Usada para ATK, MOV e ALC.
+Label in `--text-label` and `--color-text-muted`; value in `--text-heading` with tabular numerals. Used for ATK, MOV, and RNG.
 
-### Indicador de ação
+### Action Indicator
 
-Pílula com ponto e rótulo, para "Movimento" e "Ataque": disponível em `--color-heal`, usado em `--color-text-disabled` com o texto riscado.
+Pill with dot and label for "Move" and "Attack": available in `--color-heal`, spent in `--color-text-disabled` with strikethrough text.
 
-### Aviso de combate
+### Combat Toast
 
-Faixa curta no topo central, abaixo da ordem de turno: `--color-surface`, `--text-body`, raio `--radius-pill`. Entra e sai em `--duration-slow` e some sozinha em 2 s. Não recebe cliques.
+Short banner at top center, below turn order: `--color-surface`, `--text-body`, `--radius-pill`. Fades in and out over `--duration-slow` and auto-dismisses after 2 s. Pointer-events none.
 
-### Modal de resultado
+### Result Modal
 
-Fundo `--color-overlay` com desfoque. Caixa central com raio `--radius-lg` e preenchimento `--space-6`. Título em `--text-display`: `--color-success` na vitória, `--color-danger` na derrota. O modal só aparece depois que a animação do golpe final termina.
+`--color-overlay` backdrop with blur. Centered box with `--radius-lg` and `--space-6` padding. Title in `--text-display`: `--color-success` on victory, `--color-danger` on defeat. Modal appears only after the final blow's animation finishes.
 
-### Dica
+### Tooltip
 
-`title` nativo nos botões, com a ação e o motivo quando desabilitado. Sem componente próprio nesta versão.
+Native `title` attribute on buttons, showing action and disabled reason. No custom tooltip component in this version.
 
 ## Layout
 
-### Regiões
+### Regions
 
-```
+```text
 ┌──────────────────────────────────────────────────────────────────────────────┐
 │ ┌──────────┐     ┌────────────────────────────────────────┐    ┌────────────┐ │
-│ │ Título   │     │   ORDEM DE TURNO  ▼                    │    │ Mapa       │ │
-│ └──────────┘     │  [▣] [▢] [▢] [▢] [▢] [▢] [▢] [▢]      │    │ Turno      │ │
+│ │ Title    │     │   TURN ORDER      ▼                    │    │ Map        │ │
+│ └──────────┘     │  [▣] [▢] [▢] [▢] [▢] [▢] [▢] [▢]      │    │ Turn       │ │
 │ ┌──────────┐     └────────────────────────────────────────┘    │ Round      │ │
-│ │ ALIADOS  │              ( aviso de combate )                 │ [Reiniciar]│ │
-│ │ ▢ nome   │                                                   │ Inimigos   │ │
-│ │   HP ▬▬  │                                                   │ vivos 5/6  │ │
+│ │ ALLIES   │              ( combat toast )                     │ [Restart]  │ │
+│ │ ▢ name   │                                                   │ Enemies    │ │
+│ │   HP ▬▬  │                                                   │ alive 5/6  │ │
 │ │   badge  │                                                   └────────────┘ │
-│ │ ▢ ...    │                    TABULEIRO                                     │
-│ │ ▢ ...    │                 (zona livre central)                             │
+│ │ ▢ ...    │                    BOARD                                         │
+│ │ ▢ ...    │              (central free zone)                                 │
 │ │ ▢ ...    │                                                                  │
 │ └──────────┘                                                                  │
 │ ┌────────────────┐                                                            │
-│ │ UNIDADE ATIVA  │   ┌──────────────────────────────────────────────────┐     │
-│ │ ▣  nome  HP    │   │ [Mover] [Atacar] [Habilidade] [Desfazer]  [Encerrar turno (E)] │
-│ │ ATK MOV ALC    │   └──────────────────────────────────────────────────┘     │
+│ │ ACTIVE UNIT    │   ┌──────────────────────────────────────────────────┐     │
+│ │ ▣  name  HP    │   │ [Move] [Attack] [Skill] [Undo]     [End Turn (E)] │     │
+│ │ ATK MOV RNG    │   └──────────────────────────────────────────────────┘     │
 │ └────────────────┘                                                            │
 └──────────────────────────────────────────────────────────────────────────────┘
 ```
 
-| Região | Âncora | Tamanho de referência |
+| Region | Anchor | Reference Size |
 |---|---|---|
-| Título | canto superior esquerdo | 248 px de largura |
-| Painel de aliados | esquerda, abaixo do título | 248 px de largura |
-| Ordem de turno | topo, centro | até 560 px de largura, 72 px de altura |
-| Painel de partida | canto superior direito | 232 px de largura |
-| Card da unidade ativa | canto inferior esquerdo | 300 px de largura |
-| Barra de ações | base, centro | largura do conteúdo, 64 px de altura |
+| Title | top-left | 248 px wide |
+| Allies panel | left, below title | 248 px wide |
+| Turn order | top-center | up to 560 px wide, 72 px tall |
+| Match panel | top-right | 232 px wide |
+| Active unit card | bottom-left | 300 px wide |
+| Action bar | bottom-center | fit-content width, 64 px tall |
 
-A margem da tela é `--space-4`. O espaço entre painéis da mesma coluna é `--space-2`.
+Screen margin is `--space-4`. Gap between panels in the same column is `--space-2`.
 
-### Ordem de turno
+### Turn Order
 
-- **Fonte dos dados:** `turnOrder`, `turnIndex`, `units` e `round` do snapshot.
-- **Conteúdo:** a unidade ativa em primeiro lugar e as próximas na ordem em que vão agir, até oito itens.
-- **Unidades mortas** não aparecem.
-- **Virada de rodada:** quando a lista passa do fim de `turnOrder`, um separador fino com "Round N+1" marca o ponto.
-- **Ativa:** destaque descrito no componente; é a única com marcador.
-- **Time:** borda azul para aliados e vermelha para inimigos.
-- **Sem interação:** os itens não são botões. Passar o cursor mostra o nome da unidade no `title`.
-- **Atualização:** a cada mudança de ativação, os itens deslizam para a esquerda em `--duration-base`.
+- **Data source:** `turnOrder`, `turnIndex`, `units`, and `round` from snapshot.
+- **Content:** active unit first followed by upcoming units in activation order, up to eight items.
+- **Dead units** do not appear.
+- **Round wrap:** where the queue crosses the end of `turnOrder`, a thin divider labeled "Round N+1" marks the boundary.
+- **Active:** highlighted as described in the component spec; sole item with marker.
+- **Team:** blue border for allies, red for enemies.
+- **Non-interactive:** items are not buttons. Hovering shows the unit's name via `title`.
+- **Update:** on each activation change, items slide left over `--duration-base`.
 
-### Painel de aliados
+### Allies Panel
 
-- Um item por herói, na ordem da lista de unidades: retrato médio, nome, classe, barra de HP com valor e badge de estado.
-- O herói em turno tem o item com borda dourada.
-- O herói derrotado tem o retrato em cinza e a barra vazia.
-- **Não há troca manual de turno.** Os itens não são clicáveis, não mudam o cursor e não têm estado `selected`. A unidade que age é sempre a definida pela ordem de turno.
+- One entry per hero in unit list order: medium portrait, name, class, HP bar with value, and status badge.
+- Acting hero's entry has a gold border.
+- Defeated hero has greyscale portrait and empty HP bar.
+- **No manual turn switching.** Entries are not clickable, do not change cursor, and have no `selected` state. The acting unit is always decided by turn order.
 
-### Card da unidade ativa
+### Active Unit Card
 
-- Retrato grande com a borda na cor da classe.
-- Nome em `--text-heading` e a classe em `--text-label`.
-- Barra de HP com valor.
-- Três estatísticas: ATK (dano), MOV (movimento) e ALC (alcance).
-- Dois indicadores de ação: Movimento e Ataque, disponível ou usado.
-- Linha da habilidade: ícone, nome e situação ("Pronta" ou "Recarga: N rodadas").
-- Na vez dos inimigos, o card mostra o inimigo que está agindo, com a borda vermelha e sem indicadores de ação.
-- Depois do fim da batalha, o card fica vazio.
+- Large portrait with class-colored border.
+- Name in `--text-heading` and class in `--text-label`.
+- HP bar with value.
+- Three stats: ATK (damage), MOV (movement), and RNG (range).
+- Two action indicators: Move and Attack, available or spent.
+- Skill row: icon, name, and status ("Ready" or "Cooldown: N rounds").
+- During enemy turns, the card shows the acting enemy with a red border and no action indicators.
+- After battle end, the card is empty.
 
-### Barra de ações
+### Action Bar
 
-- Cinco botões de ação, na ordem: Mover, Atacar, Habilidade, Desfazer movimento, Encerrar turno (E).
-- O modo escolhido fica em `selected`. Só um por vez.
-- Condições de `disabled`:
+- Five action buttons in order: Move, Attack, Skill, Undo Move, End Turn (E).
+- Selected mode receives `selected` styling. Only one at a time.
+- `disabled` conditions:
 
-| Botão | Desabilitado quando |
+| Button | Disabled When |
 |---|---|
-| Mover | a unidade já se moveu |
-| Atacar | a unidade já atacou |
-| Habilidade | já atacou, está em recarga ou não há alvo possível |
-| Desfazer movimento | `canUndoMove` é falso |
-| Encerrar turno (E) | nunca, na vez do jogador |
+| Move | unit has already moved |
+| Attack | unit has already attacked |
+| Skill | already attacked, on cooldown, or no valid targets |
+| Undo Move | `canUndoMove` is false |
+| End Turn (E) | never, during the player's turn |
 
-- Todos ficam desabilitados na vez dos inimigos, durante animações e depois do fim da batalha. Nesses casos, uma faixa acima da barra diz o motivo: "Vez dos inimigos".
+- All buttons are disabled during enemy turns, during animations, and after battle end. In those cases, a banner above the bar explains why: "Enemy turn".
 
-### Painel de partida
+### Match Panel
 
-Compacto, no canto superior direito:
+Compact, at top-right:
 
-| Linha | Conteúdo | Fonte |
+| Row | Content | Source |
 |---|---|---|
-| Mapa | nome do mapa | `mapName` |
-| Turno | "Jogador" ou "Inimigos", com a cor do time | `phase` |
-| Round | número | `round` |
-| Reiniciar | botão secundário | — |
-| Inimigos vivos | contador "5 / 6" e uma fileira de retratos pequenos | `units` |
+| Map | map name | `mapName` |
+| Turn | "Player" or "Enemies", in team color | `phase` |
+| Round | number | `round` |
+| Restart | secondary button | — |
+| Enemies alive | "5 / 6" counter and a row of small portraits | `units` |
 
-Na fileira de inimigos, os mortos ficam em cinza. O inimigo em turno tem a borda dourada.
+In the enemy portrait row, dead enemies appear greyscale. The currently acting enemy has a gold border.
 
-## Zona livre do tabuleiro
+## Board Free Zone
 
-O tabuleiro precisa ficar visível e clicável. A zona livre é o retângulo entre os painéis:
+The board must remain visible and clickable. The free zone is the rectangle between panels:
 
-- começa à direita da coluna esquerda e termina à esquerda da coluna direita;
-- começa abaixo da ordem de turno e termina acima da barra de ações.
+- starts to the right of the left column and ends to the left of the right column;
+- starts below the turn order bar and ends above the action bar.
 
-Regras:
+Rules:
 
-- **Nenhum painel entra na zona livre.** Só as barras de HP das unidades e o aviso de combate aparecem sobre ela, e nenhum dos dois recebe cliques.
-- **O tabuleiro é centrado na zona livre,** não na janela. Quando as colunas laterais têm larguras diferentes, o enquadramento da câmera compensa.
-- **A zona livre tem no mínimo 640 × 480 px.** Abaixo disso, os painéis encolhem conforme a tabela de responsividade.
-- **O contêiner do HUD não recebe cliques;** só os painéis e botões recebem. Um clique no espaço vazio entre painéis chega ao tabuleiro.
-- **A rotação da câmera com o botão direito** começa só sobre o tabuleiro e continua mesmo que o cursor passe sobre um painel.
+- **No panel enters the free zone.** Only unit HP bars and the combat toast render over it, and neither captures clicks.
+- **The board centers in the free zone,** not the viewport. When side columns differ in width, camera framing compensates.
+- **Minimum free zone is 640 × 480 px.** Below that, panels shrink according to the responsiveness table.
+- **The HUD container does not capture clicks;** only panels and buttons do. Clicking empty space between panels reaches the board.
+- **Right-click camera orbit** starts only over the board and continues even if the pointer passes over a panel.
 
-## Responsividade (desktop)
+## Responsiveness (Desktop and Mobile Landscape)
 
-O jogo é para desktop. Abaixo de 1024 px de largura, ele mostra um aviso pedindo uma janela maior, em vez de um layout quebrado.
+The game targets desktop and phones/tablets **in landscape**. Portrait screens narrower than 1024 px, and any window narrower than 560 px or shorter than 300 px, show a "Rotate to landscape" prompt instead of a broken layout. On touch devices that support it (Android Chrome), the prompt and the main menu offer "Play fullscreen in landscape" (Fullscreen API + `screen.orientation.lock`); iOS Safari relies on the prompt only.
 
-| Largura da janela | Ajuste |
+**Compact landscape** (`orientation: landscape` and height ≤ 540 px or width ≤ 900 px — e.g. 844×390, 667×375): title card, ally names, enemy list and map row hidden; allies become a portrait rail; unit card reduced to name, HP and skill; action buttons 48 px tall with icon + short label; modals scroll inside the viewport; safe-area insets respected.
+
+**Touch input:** first tap on a reachable cell/target previews the path and shows "Tap again to confirm"; a second tap on the same target in the same mode executes. One-finger drag orbits the camera; long-press cancels the current mode (same as right-click). Renderer pixel ratio is capped at 1.5 on coarse-pointer devices.
+
+| Window Width | Adjustment |
 |---|---|
-| 1600 px ou mais | layout de referência |
-| 1280 a 1599 px | coluna esquerda com 216 px; card da unidade com 264 px; ordem de turno com até seis itens |
-| 1024 a 1279 px | painel de aliados só com retrato, barra de HP e badge, com 160 px; fileira de retratos de inimigos some e fica o contador; botões de ação só com ícone; ordem de turno com até cinco itens |
+| 1600 px or wider | reference layout |
+| 1280 to 1599 px | left column 216 px; unit card 264 px; turn order up to six items |
+| 1024 to 1279 px | allies panel shows only portrait, HP bar, and badge at 160 px; enemy portrait row hidden, counter kept; action buttons icon-only; turn order up to five items |
 
-| Altura da janela | Ajuste |
+| Window Height | Adjustment |
 |---|---|
-| 800 px ou mais | layout de referência |
-| 640 a 799 px | cartão de título some; card da unidade em uma linha só; preenchimento dos painéis em `--space-2` |
-| abaixo de 640 px | aviso pedindo uma janela maior |
+| 800 px or taller | reference layout |
+| 640 to 799 px | title card hidden; unit card single-row; panel padding `--space-2` |
+| below 640 px | prompt asking for a larger window |
 
-- Os painéis nunca passam de 30% da largura nem de 30% da altura da janela, somados por lado.
-- Nada tem barra de rolagem. Se o conteúdo não cabe, ele é resumido conforme a tabela.
-- Os tamanhos de fonte não diminuem com a janela.
-- Ao redimensionar, o enquadramento do tabuleiro é recalculado junto.
+- Panels never exceed 30% of viewport width or 30% of viewport height combined per side.
+- Nothing scrolls. If content doesn't fit, it summarizes per the table.
+- Font sizes never shrink with the viewport.
+- On resize, board framing recalculates alongside it.
 
-## Acessibilidade
+## Accessibility
 
-- Contraste mínimo de 4,5:1 entre texto e fundo; 3:1 para ícones e bordas de estado.
-- Todo botão é alcançável por teclado, na ordem visual, com o anel de foco visível.
-- `E` encerra o turno. O atalho é ignorado com o botão desabilitado, com a tecla repetindo, com Ctrl, Alt ou Meta pressionados e com o foco em um campo de texto.
-- Retratos decorativos têm `alt` vazio quando o nome está ao lado; sozinhos, levam o nome da unidade.
-- A mudança de turno e o resultado da batalha são anunciados em uma região `aria-live`.
-- Nenhuma informação depende só de cor: time, estado e modo têm rótulo, ícone ou forma diferente.
+- Minimum contrast 4.5:1 for text over background; 3:1 for icons and state borders.
+- Every button is keyboard-reachable in visual order with a visible focus ring.
+- `E` ends the turn. The shortcut is ignored if the button is disabled, on key repeat, with Ctrl/Alt/Meta held, or when focus is inside a text input.
+- Decorative portraits use empty `alt` when the unit name appears alongside; standalone portraits carry the unit's name.
+- Turn changes and battle outcomes are announced in an `aria-live` region.
+- No information relies solely on color: team, status, and mode all have a distinct label, icon, or shape.
 
-## Correspondência com o código atual
+## Mapping to Current Code
 
-| Região | Elemento hoje em `HudManager` | Mudança |
+| Region | Current Element in `HudManager` | Change |
 |---|---|---|
-| Título | `.hud-title-card` | fonte de título |
-| Painel de aliados | `#hud-hero-roster` | badge e classe; deixa de ser interativo |
-| Ordem de turno | não existe | componente novo, no topo central |
-| Aviso de combate | `#hud-combat-feedback` | desce para baixo da ordem de turno |
-| Painel de partida | `.hud-turn-card` e `.hud-enemies-card` | unidos em um painel compacto, com contador de vivos |
-| Card da unidade | `#hud-unit-card` | estatística ALC e linha da habilidade |
-| Barra de ações | `.hud-action-bar` | ícone para desfazer; estados pelos tokens |
-| Resultado | `#hud-result-overlay` | só aparece depois da animação final |
+| Title | `.hud-title-card` | display font |
+| Allies panel | `#hud-hero-roster` | badge and class; no longer interactive |
+| Turn order | does not exist | new component, top-center |
+| Combat toast | `#hud-combat-feedback` | moves below turn order |
+| Match panel | `.hud-turn-card` and `.hud-enemies-card` | merged into one compact panel with alive counter |
+| Unit card | `#hud-unit-card` | RNG stat and skill row |
+| Action bar | `.hud-action-bar` | undo icon; token-based states |
+| Result | `#hud-result-overlay` | appears only after final animation |
 
-## Lista de verificação
+## Checklist
 
-- [ ] Nenhuma cor, tamanho de fonte ou raio escrito fora dos tokens.
-- [ ] Os cinco estados aplicados a todo componente interativo.
-- [ ] A ordem de turno confere com `turnOrder` e `turnIndex` em toda mudança de ativação.
-- [ ] Os badges conferem com o snapshot nos quatro casos.
-- [ ] Nenhum clique no painel de aliados ou na ordem de turno muda quem age.
-- [ ] Nenhum painel cobre o tabuleiro nas larguras de 1024, 1280, 1600 e 1920 px.
-- [ ] Clique no espaço entre painéis chega ao tabuleiro.
-- [ ] Navegação por teclado completa, com foco visível.
-- [ ] Movimento reduzido respeitado.
+- [ ] No color, font size, or border radius hardcoded outside tokens.
+- [ ] All five interactive states applied to every interactive component.
+- [ ] Turn order matches `turnOrder` and `turnIndex` on every activation change.
+- [ ] Badges match snapshot across all four cases.
+- [ ] Clicking the allies panel or turn order never changes who acts.
+- [ ] No panel overlaps the board at 1024, 1280, 1600, and 1920 px widths.
+- [ ] Clicking gaps between panels reaches the board.
+- [ ] Full keyboard navigation with visible focus ring.
+- [ ] Reduced motion respected.

@@ -4,8 +4,8 @@ import { createUnit } from '../src/game/entities/UnitFactory';
 import { GameEngine } from '../src/game/GameEngine';
 import { knightAt, archerAt, meleeAt, armoredAt } from './helpers';
 
-describe('Postura defensiva unificada (Defender V4)', () => {
-  it('ativa isGuarding na unidade e emite unitGuarded simplificado sem afetar adjacentes', () => {
+describe('Unified defensive stance (V4 Defend)', () => {
+  it('activates isGuarding on the unit and emits simplified unitGuarded without affecting adjacent allies', () => {
     const engine = new GameEngine({
       gridSize: 8,
       obstacles: [],
@@ -39,7 +39,7 @@ describe('Postura defensiva unificada (Defender V4)', () => {
     expect(adjArcher.isGuarding).toBe(false);
   });
 
-  it('reduz dano em 50% (ceil, piso 1), emite wasGuarded e limpa isGuarding na próxima ativação', () => {
+  it('reduces damage by 50% (ceil, floor 1), emits wasGuarded, and clears isGuarding on next activation', () => {
     const engine = new GameEngine({
       gridSize: 8,
       obstacles: [],
@@ -66,7 +66,7 @@ describe('Postura defensiva unificada (Defender V4)', () => {
       isRanged: false,
     });
 
-    // Avança o turno do inimigo para iniciar a rodada 2 do cavaleiro
+    // Advances the enemy turn to start round 2 for the knight
     expect(engine.executeNextEnemyAction()).toBe(false);
 
     const stateRound2 = engine.getState();
@@ -75,7 +75,7 @@ describe('Postura defensiva unificada (Defender V4)', () => {
     expect(knightRound2.isGuarding).toBe(false);
   });
 
-  it('arredonda mitigação para cima e respeita piso mínimo de 1 dano', () => {
+  it('rounds mitigation up and respects minimum floor of 1 damage', () => {
     const attacker = createUnit(armoredAt(0, 0, 'armored-1')); // 3 ATK (basePower 2, str 7 -> +1)
     const archer = createUnit(archerAt(0, 1, 'archer-1')); // 0 DEF
     archer.isGuarding = true;
@@ -89,7 +89,7 @@ describe('Postura defensiva unificada (Defender V4)', () => {
     expect(computeDamage(weakAttacker, knight, weakAttacker.basePower, weakAttacker.attackKind)).toBe(1);
   });
 
-  it('recusa Defender se a unidade já usou a ação de ataque na ativação', () => {
+  it('rejects Defend if the unit has already used its attack action this activation', () => {
     const engine = new GameEngine({
       gridSize: 8,
       obstacles: [],
@@ -105,7 +105,7 @@ describe('Postura defensiva unificada (Defender V4)', () => {
     expect(res.ok).toBe(false);
   });
 
-  it('permite mover depois de defender e encerra a ativação automaticamente após mover e defender', () => {
+  it('allows moving after defending and automatically ends activation after moving and defending', () => {
     const engine = new GameEngine({
       gridSize: 8,
       obstacles: [],

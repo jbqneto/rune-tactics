@@ -1,0 +1,96 @@
+{
+  "timestamp": "2026-11-18T10:31:40Z",
+  "branch": "bugfix/pvp-draft-transition",
+  "browserMode": "Headless Chrome via CDP; two isolated browser contexts",
+  "baselineBeforeRound2": {
+    "statusEntryCount": 123,
+    "statusPorcelainSha256": "5679d00d371bd43cfed23204b3a2609e1d39ec2c1852492e3e28cc81c957897e"
+  },
+  "counts": {
+    "total": 10,
+    "pass": 8,
+    "fail": 1,
+    "blocked": 1
+  },
+  "results": [
+    {
+      "testId": "TC-01",
+      "description": "App menu, PvP entry, room creation and invite code",
+      "status": "PASS",
+      "details": "Main menu and PvP button rendered; Seat A created a local room and received a valid RT- invite code with MCP join tip."
+    },
+    {
+      "testId": "TC-02",
+      "description": "Seat B joins by direct invite link",
+      "status": "PASS",
+      "details": "The invite code was prefilled from ?pvp=RT-XXXXXX and the second isolated browser context joined the room."
+    },
+    {
+      "testId": "TC-03",
+      "description": "Waiting/connecting overlays transition to draft",
+      "status": "PASS",
+      "details": "Both Seat A and Seat B displayed the 3v3 draft and the other human player's name. Confirmed visually in 04_seat_a_draft_screen.png and 05_seat_b_draft_screen.png."
+    },
+    {
+      "testId": "TC-04",
+      "description": "Three-class selection, slot reorder and activation preview",
+      "status": "PASS",
+      "details": "Both clients submitted three classes; Seat A reordered Archer before Knight and the six-slot activation preview updated."
+    },
+    {
+      "testId": "TC-05",
+      "description": "Ready status synchronizes between seats",
+      "status": "PASS",
+      "details": "Seat B displayed Seat A's Ready badge; both clients reached the mutually-ready state before match initialization."
+    },
+    {
+      "testId": "TC-06",
+      "description": "Match initialization and seat-relative perspectives",
+      "status": "PASS",
+      "details": "Both clients entered the 3D match; Seat A displayed Your Turn and Seat B displayed Opponent Turn with the opposite camera perspective."
+    },
+    {
+      "testId": "TC-07",
+      "description": "Turn progression in the started match",
+      "status": "PASS",
+      "details": "Subsequent turn state was visible and synchronized in the Seat B capture."
+    },
+    {
+      "testId": "TC-08",
+      "description": "Match resolution and human-vs-human console/network hygiene",
+      "status": "PASS",
+      "details": "Forfeit resolved to Victory for Seat A; QA reported zero uncaught console errors and zero application HTTP 4xx/5xx errors in the two human contexts."
+    },
+    {
+      "testId": "TC-09",
+      "description": "Rapid repeated CDP evaluation of Seat B loading state",
+      "status": "FAIL",
+      "details": "One rapid rerun timed out waiting for Seat B's selector. The same flow succeeded in the completed browser run and both draft screenshots; treat this as an automation flake, not a confirmed product failure."
+    },
+    {
+      "testId": "TC-10",
+      "description": "Human vs MCP agent in the local browser room",
+      "status": "BLOCKED",
+      "details": "The external MCP agent request returned HTTP 401 because the local dev server uses an ephemeral in-memory session secret not shared with that process. Human-vs-MCP browser flow was not verified."
+    }
+  ],
+  "evidence": [
+    "round-2/01_main_menu.png",
+    "round-2/02_seat_a_waiting_room.png",
+    "round-2/03_seat_b_joining.png",
+    "round-2/04_seat_a_draft_screen.png",
+    "round-2/05_seat_b_draft_screen.png",
+    "round-2/06_seat_a_reordered_draft.png",
+    "round-2/07_seat_b_sees_seat_a_ready.png",
+    "round-2/08_mutual_ready.png",
+    "round-2/09_match_seat_a_turn1.png",
+    "round-2/10_match_seat_b_turn1.png",
+    "round-2/11_match_seat_b_turn2.png",
+    "round-2/12_match_result_victory.png"
+  ],
+  "notes": [
+    "The filename 08_mutual_ready.png is misleading: visual inspection shows the 3D match already started; use 07_seat_b_sees_seat_a_ready.png for the Ready badge evidence.",
+    "No source, server, or test files were changed during round-2 QA; only screenshots were added under round-2/.",
+    "The original qa_report.json was stale/inconsistent and has been reconciled to this final round-2 matrix."
+  ]
+}

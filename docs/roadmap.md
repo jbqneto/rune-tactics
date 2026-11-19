@@ -1,52 +1,52 @@
 # Roadmap
 
-A V2 é a versão atual e está concluída. A V3 e a V4 estão aqui apenas como direção: nada delas foi implementado, e nenhum código deve ser escrito para antecipá-las sem um pedido explícito.
+V2 is the current version and is complete. V3 and V4 are listed here purely as direction: none of them are implemented yet, and no code should be written to anticipate them without an explicit request.
 
-## V1: protótipo de sistemas (concluída)
+## V1: Systems Prototype (completed)
 
-Referência: `references/ref-v1.png`.
+Reference: `references/ref-v1.png`.
 
-- Tabuleiro 8x8 com obstáculos, um guerreiro contra dois esqueletos.
-- Movimento ortogonal, ataque corpo a corpo, turnos, vitória e derrota.
-- Na V1.1, movimento e ataque passaram a valer em qualquer ordem, e o turno passou a terminar sozinho quando não sobra ação.
+- 8x8 board with obstacles, one knight against two skeletons.
+- Orthogonal movement, melee attack, turns, victory, and defeat.
+- In V1.1, movement and attack became usable in either order, and turns started ending automatically when no actions remain.
 
-## V2: RPG tático (concluída)
+## V2: Tactical RPG (completed)
 
-Referência: `references/ref-v2.png`. As regras estão em `docs/game-design.md`.
+Reference: `references/ref-v2.png`. Rules are documented in `docs/game-design.md`.
 
-- Três classes de herói: guerreiro, arqueira e mago.
-- Uma habilidade com recarga por classe: Runic Strike, Marked Shot e Arcane Burst, esta em área.
-- Ataque à distância com linha de visão. Paredes e pilares bloqueiam a visão; caixotes e barris bloqueiam só o movimento.
-- Três tipos de esqueleto, cada um com comportamento próprio: Melee Skeleton, Skeleton Archer e Armored Skeleton.
-- Várias unidades por lado, com seleção livre entre os heróis.
-- Arena medieval com piso e muros de pedra, ruínas e tochas.
-- HUD com retratos, barra de ações e ícones, com os assets em `public/assets/`.
+- Three hero classes: knight, archer, and mage.
+- One skill with cooldown per class: Runic Strike, Marked Shot, and Arcane Burst (area of effect).
+- Ranged attacks with line of sight. Walls and pillars block sight; crates and barrels only block movement.
+- Three skeleton types, each with its own behavior: Melee Skeleton, Skeleton Archer, and Armored Skeleton.
+- Multiple units per side, with free selection among heroes.
+- Medieval arena with stone floor and walls, ruins, and torches.
+- HUD with portraits, action bar, and icons, with assets in `public/assets/`.
 
-Estes itens apareciam na referência da V2 e não entraram. Passam para a V3:
+These items appeared in the V2 reference and did not make it in. They carry over to V3:
 
-- Chefe (War Chief).
-- Objetivos de missão, como manter o altar rúnico por 3 rodadas.
-- Ordem de turno por unidade, exibida em uma barra.
-- Nível dos heróis.
-- Habilidade defensiva (Guard).
-- Tipos de terreno com custo de movimento e efeito.
+- Boss (War Chief).
+- Mission objectives, such as holding the runic altar for 3 rounds.
+- Per-unit turn order displayed in a turn bar.
+- Hero levels.
+- Defensive ability (Guard).
+- Terrain types with movement cost and effect.
 
-## V3: campos maiores e táticas mais profundas (planejada, não implementada)
+## V3: Larger Battlefields and Deeper Tactics (planned, not implemented)
 
-Referência: `references/ref-v3.png`.
+Reference: `references/ref-v3.png`.
 
-- Os itens adiados da V2, listados acima.
-- Mapas maiores, com terreno em vários níveis. Terreno alto custa mais movimento e dá bônus de ataque e defesa.
-- Mais classes (clérigo anão) e mais tipos de inimigo (goblin, mago inimigo).
-- Atributo de defesa e mais habilidades (Shield Wall).
-- Efeitos de célula, como o campo arcano que causa dano e aplica fraqueza.
-- Itens, relíquias e baús.
-- Progressão dos heróis entre batalhas.
+- The deferred items from V2 listed above.
+- Larger maps with multi-level terrain. High ground costs more movement and grants attack and defense bonuses.
+- More classes (dwarf cleric) and more enemy types (goblin, enemy mage).
+- Defense attribute and additional skills (Shield Wall).
+- Cell effects, such as an arcane field that deals damage and applies weakness.
+- Items, relics, and chests.
+- Hero progression between battles.
 
-## V4: a definir (planejada, não implementada)
+## V4: To Be Defined (planned, not implemented)
 
-Não há referência para a V4. As ideias abaixo são provisórias e precisam ser confirmadas antes de qualquer planejamento:
+There is no visual reference for V4. The ideas below are provisional and need confirmation before any planning:
 
-- Campanha com várias missões encadeadas.
-- Partidas salvas.
-- Som e música.
+- Campaign with multiple chained missions.
+- Saved games.
+- Sound and music.

@@ -16,12 +16,17 @@ import type {
   TurnState,
 } from './shared/types';
 import { HudManager } from './ui/HudManager';
+import { ColyseusMatchClient } from './network/ColyseusMatchClient';
+import { PvPClientEngine } from './network/PvPClientEngine';
+import { PvPLobbyOverlay } from './ui/PvPLobbyOverlay';
+import { syncPvPDraftOverlay } from './ui/pvpDraftSync';
+import type { PlayerSeat, PvPHeroClass } from './shared/pvpTypes';
 
 const canvas = document.getElementById('game-canvas') as HTMLCanvasElement | null;
 const hudEl = document.getElementById('hud');
 
 if (!canvas || !hudEl) {
-  throw new Error('Elementos #game-canvas ou #hud não encontrados no DOM.');
+  throw new Error('Required DOM elements #game-canvas or #hud were not found.');
 }
 
 const saveSystem = new SaveSystem(window.localStorage);
@@ -95,7 +100,62 @@ let lastTimerActiveId: string | null = null;
 let lastTimerRound = 0;
 let lastTimerTurnState: TurnState | null = null;
 let isMenuOpen = true;
+let isMapViewerActive = false;
+let selectedViewerMapId = MAPS[0]?.id ?? 'ashen-ruins';
 let campaignVictoryHandled = false;
+
+let matchClient: ColyseusMatchClient | null = null;
+let pvpEngine: PvPClientEngine | null = null;
+let pvpLobbyOverlay: PvPLobbyOverlay | null = null;
+let currentPvPSeat: PlayerSeat = 'A';
+let pvpDraftClasses: PvPHeroClass[] = ['knight', 'archer', 'mage'];
+
+function clearBoardHighlights(): void {
+  boardRenderer.setHighlights({
+    reachable: [],
+    attackable: [],
+    skillTargets: [],
+    skillArea: [],
+    dangerCells: [],
+    hoverCell: null,
+    path: null,
+  });
+}
+
+function renderMapInViewer(mapId: string): void {
+  const map = MAPS.find((m) => m.id === mapId) ?? MAPS[0];
+  if (!map) return;
+  selectedViewerMapId = map.id;
+  boardRenderer.buildBoard(map.gridSize, map.obstacles, {
+    mapId: map.id,
+    theme: map.theme,
+    bridgeCells: map.bridgeCells,
+  });
+  sceneManager.applyAtmosphere(boardRenderer.getAtmosphere() ?? DEFAULT_ATMOSPHERE);
+  clearBoardHighlights();
+  hudManager.showMapViewer(MAPS, selectedViewerMapId);
+}
+
+function openMapViewer(): void {
+  if (import.meta.env.ENVIRONMENT !== 'development') return;
+  isMapViewerActive = true;
+  isMenuOpen = true;
+  mode = 'default';
+  clearHover();
+  unitRenderer.clear();
+  renderMapInViewer(selectedViewerMapId);
+}
+
+function exitMapViewer(): void {
+  if (!isMapViewerActive) return;
+  isMapViewerActive = false;
+  isMenuOpen = true;
+  hudManager.hideMapViewer();
+  const state = engine.getState();
+  rebuildBoardForState(state);
+  syncFromEngine();
+  hudManager.showModeMenu(saveSystem.load());
+}
 
 function rebuildBoardForState(state: GameStateSnapshot): void {
   const map = MAPS.find((m) => m.id === state.mapId);
@@ -124,6 +184,8 @@ function getUniqueDangerCells(state: GameStateSnapshot): GridCoord[] {
 
 function startBattleWithSetup(setup: GameSetup): void {
   engine = new GameEngine(setup);
+  // Restore Math.PI / 4 camera for PvE
+  sceneManager.setAzimuth(Math.PI / 4, true);
   const state = engine.getState();
   rebuildBoardForState(state);
   mode = 'default';
@@ -196,9 +258,183 @@ function handleDefend(): void {
   }
 }
 
+function getMatchClient(): ColyseusMatchClient {
+  if (!matchClient) {
+    matchClient = new ColyseusMatchClient();
+    matchClient.onDrop(() => {
+      hudManager.setPvPReconnecting(true);
+    });
+    matchClient.onReconnect(() => {
+      hudManager.setPvPReconnecting(false);
+    });
+    matchClient.onError((_code, msg) => {
+      hudManager.showFeedback(msg || 'Network error');
+    });
+    matchClient.onLeave(() => {
+      hudManager.setPvPReconnecting(false);
+      hudManager.setPvPPause(false);
+      hudManager.setPvPOpponent(null);
+    });
+    matchClient.onMatchInit((data) => {
+      currentPvPSeat = data.mySeat;
+      const oppSeatKey = data.mySeat === 'A' ? 'B' : 'A';
+      const oppSeat = (data.state.seats as any)?.[oppSeatKey];
+      hudManager.setPvPOpponent({
+        displayName: oppSeat?.displayName,
+        actorType: oppSeat?.actorType || 'human',
+      });
+      if (!pvpEngine) {
+        pvpEngine = new PvPClientEngine({
+          mySeat: data.mySeat,
+          client: matchClient!,
+          initialState: data.state,
+          initialLegalActions: data.legalActions,
+          onErrorFeedback: (msg) => hudManager.showFeedback(msg),
+        });
+      } else {
+        pvpEngine.handleMatchInit(data);
+      }
+      engine = pvpEngine;
+      isMenuOpen = false;
+      pvpLobbyOverlay?.hide();
+      hudManager.hideOverlays();
+
+      // 180° camera for Seat B, 45° for Seat A
+      if (data.mySeat === 'B') {
+        sceneManager.setAzimuth((5 * Math.PI) / 4, true);
+      } else {
+        sceneManager.setAzimuth(Math.PI / 4, true);
+      }
+
+      rebuildBoardForState(engine.getState());
+      syncFromEngine();
+    });
+    matchClient.onMatchEvents((data) => {
+      pvpEngine?.handleMatchEvents(data);
+      syncFromEngine();
+    });
+    matchClient.onLegalActions((data) => {
+      pvpEngine?.handleLegalActions(data);
+      refreshHighlights();
+      const state = engine.getState();
+      const hasSkillTargets = state.selectedUnitId ? engine.getSkillTargetCells().length > 0 : false;
+      hudManager.update(state, mode, unitRenderer.isAnimating, hasSkillTargets);
+    });
+    matchClient.onCommandResult((data) => {
+      pvpEngine?.handleCommandResult(data);
+      if (!data.ok) {
+        hudManager.showFeedback(data.message);
+      }
+    });
+    matchClient.onRoomPhase((phase) => {
+      if ((phase === 'CHARACTER_SELECTION' || phase === 'WAITING_FOR_READY') && !pvpLobbyOverlay?.isInDraft()) {
+        isMenuOpen = true;
+        const oppActorType = matchClient?.getSeatActorType(currentPvPSeat === 'A' ? 'B' : 'A') || 'human';
+        const myActorType = matchClient?.getSeatActorType(currentPvPSeat) || 'human';
+        pvpLobbyOverlay?.showDraft(
+          currentPvPSeat,
+          pvpDraftClasses,
+          false,
+          {
+            displayName: 'Opponent',
+            connected: true,
+            ready: false,
+            selectedCount: 3,
+            actorType: oppActorType,
+          },
+          myActorType
+        );
+      }
+    });
+    const syncDraft = (phase: string | undefined, seats: Parameters<typeof syncPvPDraftOverlay>[0]['seats']) =>
+      syncPvPDraftOverlay({
+        overlay: pvpLobbyOverlay,
+        mySeat: currentPvPSeat,
+        draftClasses: pvpDraftClasses,
+        phase,
+        seats,
+        onOpponentUpdate: (info) => hudManager.setPvPOpponent(info),
+        onOpenMenu: (open) => {
+          isMenuOpen = open;
+        },
+        publishDraft: (classes) => matchClient?.selectClasses(classes),
+      });
+    matchClient.onLobbyState((lobby) => syncDraft(lobby.phase, lobby.seats));
+    matchClient.onRoomStateChange((roomState: any) => {
+      if (!roomState) return;
+      const phase = roomState.roomPhase;
+      const handledDraft = syncDraft(phase, roomState.seats);
+      if (!handledDraft && phase === 'WAITING_FOR_PLAYER') {
+        if (roomState.inviteCode) {
+          pvpLobbyOverlay?.showWaitingForPlayer(roomState.inviteCode);
+        }
+      }
+    });
+  }
+  return matchClient;
+}
+
+function getPvPLobbyOverlay(): PvPLobbyOverlay {
+  if (!pvpLobbyOverlay) {
+    pvpLobbyOverlay = new PvPLobbyOverlay(hudEl!, {
+      onCreateRoom: async (displayName) => {
+        const client = getMatchClient();
+        const session = await client.acquireSession(displayName);
+        const roomMeta = await client.createRoom(session.sessionToken);
+        currentPvPSeat = 'A';
+        await client.joinRoom(roomMeta.roomId, session.sessionToken, roomMeta.inviteCode);
+        pvpLobbyOverlay?.showWaitingForPlayer(roomMeta.inviteCode);
+      },
+      onJoinRoom: async (inviteCode, displayName) => {
+        const client = getMatchClient();
+        const session = await client.acquireSession(displayName);
+        const roomMeta = await client.lookupRoom(inviteCode, session.sessionToken);
+        currentPvPSeat = 'B';
+        await client.joinRoom(roomMeta.roomId, session.sessionToken, inviteCode);
+      },
+      onReconnect: async () => {
+        const client = getMatchClient();
+        await client.reconnect();
+      },
+      onDiscardReconnect: () => {
+        const client = getMatchClient();
+        client.clearStoredReconnectionToken();
+      },
+      onSelectClasses: (classes) => {
+        pvpDraftClasses = [...classes];
+        const client = getMatchClient();
+        client.selectClasses(classes);
+      },
+      onToggleReady: (ready) => {
+        const client = getMatchClient();
+        client.setReady(ready);
+      },
+      onLeaveRoom: () => {
+        const client = getMatchClient();
+        client.leave();
+        isMenuOpen = true;
+        hudManager.showModeMenu(saveSystem.load());
+      },
+      onBackToMenu: () => {
+        isMenuOpen = true;
+        hudManager.showModeMenu(saveSystem.load());
+      },
+    });
+  }
+  return pvpLobbyOverlay;
+}
+
+function openPvPLobby(initialInviteCode?: string): void {
+  const client = getMatchClient();
+  const hasReconnect = !!client.getStoredReconnectionToken();
+  hudManager.hideOverlays();
+  isMenuOpen = true;
+  getPvPLobbyOverlay().showLobby(hasReconnect, initialInviteCode);
+}
+
 const hudManager = new HudManager(hudEl, {
   onSelectUnit: (_unitId) => {
-    // V2.1: troca manual de unidade bloqueada pela ordem fixa de turnos.
+    // V2.1: manual unit switching is locked by fixed turn order.
   },
   onSetMode: (nextMode) => {
     if (isMenuOpen || unitRenderer.isAnimating || engine.getState().phase !== 'player') return;
@@ -226,12 +462,16 @@ const hudManager = new HudManager(hudEl, {
   onEndTurn: handleEndTurn,
   onReset: () => {
     const current = engine.getState();
+    if (current.mode === 'pvp') {
+      return;
+    }
     if (current.mode === 'campaign') {
       campaignSystem.restartCurrentStage();
       startBattleWithSetup(campaignSystem.createStageGameSetup());
       return;
     }
     engine.reset();
+    sceneManager.setAzimuth(Math.PI / 4, true);
     const newState = engine.getState();
     rebuildBoardForState(newState);
     mode = 'default';
@@ -248,6 +488,14 @@ const hudManager = new HudManager(hudEl, {
   onNewCampaign: startNewCampaign,
   onContinueCampaign: continueCampaign,
   onQuickBattle: startQuickBattle,
+  onPvPBattle: () => openPvPLobby(),
+  onForfeit: () => {
+    matchClient?.forfeit();
+  },
+  onRequestRematch: () => {
+    matchClient?.requestRematch();
+    hudManager.showFeedback('Rematch requested — waiting for opponent...');
+  },
   onOpenMenu: () => {
     isMenuOpen = true;
     hudManager.showModeMenu(saveSystem.load());
@@ -272,6 +520,9 @@ const hudManager = new HudManager(hudEl, {
     campaignSystem.restartCurrentStage();
     startBattleWithSetup(campaignSystem.createStageGameSetup());
   },
+  onOpenMapViewer: openMapViewer,
+  onSelectViewerMap: renderMapInViewer,
+  onExitMapViewer: exitMapViewer,
 });
 
 window.addEventListener(
@@ -376,45 +627,45 @@ function emitCombatFeedback(events: GameEvent[]): void {
     if (ev.type === 'skillUsed') {
       const caster = units.find((u) => u.id === ev.casterId);
       if (caster) {
-        hudManager.showFeedback(`${caster.name} usou ${caster.skillName ?? ev.skillId}!`);
+        hudManager.showFeedback(`${caster.name} used ${caster.skillName ?? ev.skillId}!`);
       }
     } else if (ev.type === 'unitHealed') {
       const caster = units.find((u) => u.id === ev.casterId);
       const target = units.find((u) => u.id === ev.targetId);
       if (caster && target) {
-        hudManager.showFeedback(`${caster.name} curou ${target.name} (+${ev.amount} HP)!`);
+        hudManager.showFeedback(`${caster.name} healed ${target.name} (+${ev.amount} HP)!`);
       }
     } else if (ev.type === 'unitGuarded') {
       const unit = units.find((u) => u.id === ev.unitId);
       if (unit) {
-        hudManager.showFeedback(`${unit.name} assumiu postura defensiva (-50% dano)!`);
+        hudManager.showFeedback(`${unit.name} assumed a defensive stance (-50% damage)!`);
       }
     } else if (ev.type === 'attackPrepared') {
       const caster = units.find((u) => u.id === ev.pendingAttack.casterId);
       hudManager.showFeedback(
-        `${caster?.name ?? 'Inimigo'} está preparando ${ev.pendingAttack.skillName}!`
+        `${caster?.name ?? 'Enemy'} is preparing ${ev.pendingAttack.skillName}!`
       );
     } else if (ev.type === 'pendingAttackResolved') {
       const caster = units.find((u) => u.id === ev.casterId);
       hudManager.showFeedback(
-        `${caster?.name ?? 'Inimigo'} desencadeou ${ev.skillName}!`
+        `${caster?.name ?? 'Enemy'} unleashed ${ev.skillName}!`
       );
     } else if (ev.type === 'attackCancelled') {
       const caster = units.find((u) => u.id === ev.casterId);
       hudManager.showFeedback(
-        `Ataque anunciado de ${caster?.name ?? 'inimigo'} foi cancelado!`
+        `${caster?.name ?? 'Enemy'}'s telegraphed attack was cancelled!`
       );
     } else if (ev.type === 'bossPhaseChanged') {
       const boss = units.find((u) => u.id === ev.unitId);
       hudManager.showFeedback(
-        `🔥 ${boss?.name ?? 'Guardião das Cinzas'} entrou na Fase 2: Fúria das Cinzas!`
+        `🔥 ${boss?.name ?? 'Ashen Guardian'} entered Phase 2: Ashen Fury!`
       );
     } else if (ev.type === 'unitAttacked' && !ev.skillId) {
       const attacker = units.find((u) => u.id === ev.attackerId);
       const target = units.find((u) => u.id === ev.targetId);
       if (attacker && target) {
         const guardNote = ev.wasGuarded ? ' (🛡 -50%)' : '';
-        hudManager.showFeedback(`${attacker.name} causou ${ev.damage} de dano em ${target.name}${guardNote}!`);
+        hudManager.showFeedback(`${attacker.name} dealt ${ev.damage} damage to ${target.name}${guardNote}!`);
       }
     }
   }
@@ -441,6 +692,16 @@ function handleCampaignVictoryIfNeeded(state: GameStateSnapshot): void {
 }
 
 function updateTurnTimerState(state: GameStateSnapshot): void {
+  if (state.mode === 'pvp') {
+    if (state.pvp?.turnDeadlineMs) {
+      const remaining = Math.max(0, (state.pvp.turnDeadlineMs - Date.now()) / 1000);
+      hudManager.updateTurnTimer(remaining);
+    } else {
+      hudManager.updateTurnTimer(null);
+    }
+    return;
+  }
+
   if (state.turnState === 'player_unit_active') {
     const unitChanged = state.activeUnitId !== lastTimerActiveId;
     const roundChanged = state.round !== lastTimerRound;
@@ -471,7 +732,15 @@ function syncFromEngine(): void {
   }
   lastPhase = state.phase;
 
-  unitRenderer.syncUnits(state.units, state.selectedUnitId, state.turnOrder, state.activeUnitId);
+  const isBattleOver = state.phase === 'victory' || state.phase === 'defeat';
+  unitRenderer.syncUnits(
+    state.units,
+    state.selectedUnitId,
+    state.turnOrder,
+    state.activeUnitId,
+    state.mode === 'pvp',
+    !isBattleOver
+  );
   refreshHighlights();
 
   const hasSkillTargets = state.selectedUnitId
@@ -494,12 +763,14 @@ new InputManager(
       mode = nextMode;
     },
     onHoverChange: (cell, path, skillArea) => {
+      if (isMapViewerActive) return;
       hoverCell = cell;
       hoverPath = path;
       hoverSkillArea = skillArea;
       refreshHighlights();
     },
     onActionExecuted: () => {
+      if (isMapViewerActive) return;
       clearHover();
       syncFromEngine();
     },
@@ -510,7 +781,7 @@ new InputManager(
   sceneManager.cameraController
 );
 
-// Initial setup: exibe seletor de modo com o cenário 3D ao fundo
+// Initial setup: show mode selector with the 3D scenario in the background
 const initialState = engine.getState();
 rebuildBoardForState(initialState);
 syncFromEngine();
@@ -535,6 +806,16 @@ sceneManager.start((dt) => {
   if (isMenuOpen) return;
 
   const state = engine.getState();
+  if (state.mode === 'pvp') {
+    // In PvP, the server owns the 60s turn timer and advances on timeout.
+    // Client-side auto endPlayerTurn() and local AI stepping are disabled.
+    if (state.pvp?.turnDeadlineMs) {
+      const remaining = Math.max(0, (state.pvp.turnDeadlineMs - Date.now()) / 1000);
+      hudManager.updateTurnTimer(remaining);
+    }
+    return;
+  }
+
   if (state.turnState === 'player_unit_active') {
     turnTimerSeconds = Math.max(0, turnTimerSeconds - dt);
     hudManager.updateTurnTimer(Math.ceil(turnTimerSeconds));
@@ -556,3 +837,12 @@ sceneManager.start((dt) => {
     }
   }
 });
+
+// Check URL for invite code
+if (typeof window !== 'undefined') {
+  const urlParams = new URLSearchParams(window.location.search);
+  const pvpCodeFromUrl = urlParams.get('pvp');
+  if (pvpCodeFromUrl && pvpCodeFromUrl.trim().length > 0) {
+    openPvPLobby(pvpCodeFromUrl.trim().toUpperCase());
+  }
+}

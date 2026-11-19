@@ -74,7 +74,7 @@ function scoreEnemyTarget(attacker: UnitState, enemy: UnitState, allies: readonl
   const hitsToKill = Math.ceil(enemy.hp / Math.max(1, expectedDmg));
   const guardPenalty = enemy.isGuarding ? 30 : 0;
   const dist = manhattan(attacker.pos, enemy.pos);
-  // Coesão tática + eficiência de abate (evita desperdiçar ataques em 2 DEF enquanto conjuradores estão abertos)
+  // Tactical cohesion + kill efficiency (avoids wasting attacks on 2 DEF while casters are open)
   const allyAvgDist =
     allies.reduce((sum, a) => sum + manhattan(a.pos, enemy.pos), 0) / Math.max(1, allies.length);
   return (
@@ -88,11 +88,11 @@ function scoreEnemyTarget(attacker: UnitState, enemy: UnitState, allies: readonl
 }
 
 /**
- * Executa uma ativação determinística simples do jogador:
- * 1. Se estiver dentro de uma zona de PendingAttack, tenta sair dela com `moveSelectedUnit` ou atacar/defender.
- * 2. Clérigo prioriza curar aliados feridos (Healing Light) antes de atacar.
- * 3. Demais heróis priorizam usar skill ofensiva (escolhendo melhor área no Arcane Burst) ou `smartAttack`.
- * 4. Se nenhum inimigo estiver ao alcance, aproxima-se do inimigo prioritário e usa `defend()` se perto do perigo.
+ * Executes a simple deterministic player activation:
+ * 1. If inside a PendingAttack zone, tries to leave it with `moveSelectedUnit` or attack/defend.
+ * 2. Cleric prioritizes healing injured allies (Healing Light) before attacking.
+ * 3. Other heroes prioritize offensive skill (picking best area for Arcane Burst) or `smartAttack`.
+ * 4. If no enemy is in range, moves toward priority enemy and uses `defend()` if near danger.
  */
 function runDeterministicHeroTurn(engine: GameEngine): GameEvent[] {
   const collected: GameEvent[] = [];
@@ -114,7 +114,7 @@ function runDeterministicHeroTurn(engine: GameEngine): GameEvent[] {
     return collected;
   }
 
-  // Passo 1: Clérigo cura aliado ferido se possível
+  // Step 1: Cleric heals injured ally if possible
   if (hero.type === 'cleric' && hero.skillCooldown === 0 && !hero.hasAttacked) {
     const injuredAllies = engine
       .getState()
@@ -143,7 +143,7 @@ function runDeterministicHeroTurn(engine: GameEngine): GameEvent[] {
         ) {
           collected.push(...engine.consumeEvents());
           hero = getHero();
-          // Recua de zona de perigo após curar se ainda tiver movimento
+          // Retreats from danger zone after healing if movement is still available
           if (
             engine.getState().activeUnitId === heroId &&
             engine.getState().turnState === 'player_unit_active' &&
@@ -165,7 +165,7 @@ function runDeterministicHeroTurn(engine: GameEngine): GameEvent[] {
     }
   }
 
-  // Passo 2: Se estiver em zona de ataque anunciado e ainda não moveu, sai para célula segura
+  // Step 2: If inside a telegraphed attack zone and hasn't moved yet, move to a safe cell
   if (isCellInPendingDanger(engine, hero.pos) && !hero.hasMoved) {
     const aliveEnemies = engine.getState().units.filter((u) => u.alive && u.team === 'enemy');
     const safeCells = engine
@@ -234,7 +234,7 @@ function runDeterministicHeroTurn(engine: GameEngine): GameEvent[] {
     }
   }
 
-  // Passo 4: Tenta ataque básico inteligente em inimigo prioritário
+  // Step 4: Try smart basic attack on priority enemy
   const sortedEnemies = engine
     .getState()
     .units.filter((u) => u.alive && u.team === 'enemy')
@@ -244,7 +244,7 @@ function runDeterministicHeroTurn(engine: GameEngine): GameEvent[] {
     const plan = engine.getSmartAttackPlan(target.id);
     if (!plan) continue;
     const dest = plan.path[plan.path.length - 1];
-    // Se já está em danger ou destino é seguro, ataca (se o único jeito for entrar em danger, evita a menos que seja golpe letal)
+    // If already in danger or destination is safe, attack (if only way is entering danger, avoid unless lethal)
     const isLethal =
       computeDamage(hero, target, hero.basePower, hero.attackKind) >= target.hp;
     if (isCellInPendingDanger(engine, dest) && !isLethal) continue;
@@ -255,7 +255,7 @@ function runDeterministicHeroTurn(engine: GameEngine): GameEvent[] {
     }
   }
 
-  // Passo 5: Se não alcançou ataque ainda e pode mover, avança mantendo distância segura para alcance
+  // Step 5: If still out of attack range and can move, advance keeping safe range distance
   hero = getHero();
   if (!hero.hasMoved && sortedEnemies.length > 0) {
     const primary = sortedEnemies[0];
@@ -298,7 +298,7 @@ function runDeterministicHeroTurn(engine: GameEngine): GameEvent[] {
     }
   }
 
-  // Passo 6: Se ainda não atacou após mover (ex.: Guerreiro ou Clérigo na vanguarda, ou alguém em zona de perigo), usa Defender!
+  // Step 6: If still hasn't attacked after moving (e.g., Knight or Cleric on frontline, or someone in danger), use Defend!
   if (
     engine.getState().activeUnitId === heroId &&
     engine.getState().turnState === 'player_unit_active' &&
@@ -315,15 +315,15 @@ function runDeterministicHeroTurn(engine: GameEngine): GameEvent[] {
   return collected;
 }
 
-describe('V4 Simulação de Balanceamento e Campanha Completa', () => {
-  it('compara potencial de dano por classe (Guerreiro STR > Arqueira DEX > Mago INT > Clérigo cura INT) e evolução até o limite 12', () => {
+describe('V4 Balance Simulation and Full Campaign', () => {
+  it('compares damage potential by class (Knight STR > Archer DEX > Mage INT > Cleric heal INT) and progression up to cap 12', () => {
     const knight = createUnit({ id: 'k', type: 'knight', team: 'player', pos: { x: 0, y: 0 } });
     const archer = createUnit({ id: 'a', type: 'archer', team: 'player', pos: { x: 0, y: 0 } });
     const mage = createUnit({ id: 'm', type: 'mage', team: 'player', pos: { x: 0, y: 0 } });
     const cleric = createUnit({ id: 'c', type: 'cleric', team: 'player', pos: { x: 0, y: 0 } });
     const dummy = createUnit({ id: 'd', type: 'goblin-scout', team: 'enemy', pos: { x: 0, y: 1 } }); // 0 DEF
 
-    // Base (nível 0): habilidades ofensivas vs alvo 0 DEF e cura do Clérigo
+    // Base (level 0): offensive skills vs 0 DEF dummy and Cleric heal
     const baseKnightSkillDmg = computeDamage(
       knight,
       dummy,
@@ -343,7 +343,7 @@ describe('V4 Simulação de Balanceamento e Campanha Completa', () => {
       SKILLS['arcane-burst'].attackKind!,
     );
     const baseClericHeal = SKILLS['healing-light'].heal + offensiveBonus(cleric.attributes.int);
-    const baseClericSkillDmg = 0; // Healing Light não causa dano
+    const baseClericSkillDmg = 0; // Healing Light deals no damage
 
     expect(baseKnightSkillDmg).toBe(4);
     expect(baseArcherSkillDmg).toBe(3);
@@ -353,7 +353,7 @@ describe('V4 Simulação de Balanceamento e Campanha Completa', () => {
     expect(baseArcherSkillDmg).toBeGreaterThan(baseMageSkillDmg);
     expect(baseMageSkillDmg).toBeGreaterThan(baseClericSkillDmg);
 
-    // Evoluir o atributo principal de cada classe até MAX_ATTRIBUTE (12)
+    // Upgrade each class's main attribute up to MAX_ATTRIBUTE (12)
     const evolveToMax = (type: UnitType, attr: AttributeKey): AttributeProgressionTarget => {
       const stats = UNIT_STATS[type];
       let target: AttributeProgressionTarget = {
@@ -368,7 +368,7 @@ describe('V4 Simulação de Balanceamento e Campanha Completa', () => {
         expect(res.ok).toBe(true);
         if (res.ok) target = res.hero;
       }
-      // Tentativa além de MAX_ATTRIBUTE = 12 deve ser recusada
+      // Attempt beyond MAX_ATTRIBUTE = 12 must be rejected
       expect(applyAttributePoint(target, attr).ok).toBe(false);
       return target;
     };
@@ -386,7 +386,7 @@ describe('V4 Simulação de Balanceamento e Campanha Completa', () => {
     expect(maxKnightBasic).toBe(4); // 2 + offensiveBonus(12) = 4
     expect(maxArcherBasic).toBe(4);
     expect(maxMageBasic).toBe(4);
-    expect(maxClericBasic).toBe(2); // ataque básico do Clérigo escala com STR (5 -> +0), não com INT!
+    expect(maxClericBasic).toBe(2); // Cleric basic attack scales with STR (5 -> +0), not INT!
 
     const maxKnightSkillDmg = computeDamage(
       maxKnight,
@@ -487,8 +487,8 @@ describe('V4 Simulação de Balanceamento e Campanha Completa', () => {
     expect(unitOf(combatEngine, 'c').hp).toBe(8);
   });
 
-  it('valida sobrevivência com FORT no limite e defend() (mitigação 50% mantendo dano mínimo 1)', () => {
-    // Evoluir Guerreiro até FORT = 12 (maxHp 24, DEF 3)
+  it('validates survival with FORT at cap and defend() (50% mitigation keeping minimum 1 damage)', () => {
+    // Upgrade Knight to FORT = 12 (maxHp 24, DEF 3)
     const knightStats = UNIT_STATS.knight;
     let fortKnight: AttributeProgressionTarget = {
       baseHp: knightStats.baseHp,
@@ -508,7 +508,7 @@ describe('V4 Simulação de Balanceamento e Campanha Completa', () => {
     expect(fortitudeResistance(fortKnight.attributes.fort)).toBe(2);
     expect(computeUnitArmor(knightStats.baseArmor, fortKnight.attributes.fort)).toBe(3);
 
-    // Simulação comparativa no motor: Guerreiro base vs Guerreiro FORT=12 + defend() contra Chefe (5 ATK) e Goblin (2 ATK)
+    // Comparative engine simulation: Knight FORT=12 + defend() vs Boss (5 ATK) and Goblin (2 ATK)
     const engine = new GameEngine({
       gridSize: 8,
       obstacles: [],
@@ -530,12 +530,12 @@ describe('V4 Simulação de Balanceamento e Campanha Completa', () => {
     });
     engine.consumeEvents();
 
-    // Rodada 1: Guerreiro (24 HP, 3 DEF) usa defend() e encerra turno
+    // Round 1: Knight (24 HP, 3 DEF) uses defend() and ends turn
     expect(engine.defend().ok).toBe(true);
     expect(engine.endPlayerTurn().ok).toBe(true);
     engine.consumeEvents();
 
-    // Chefe prepara ataque ou ataca; Goblin (2 ATK) ataca Guerreiro (3 DEF + defend): dano mínimo = 1!
+    // Boss prepares attack or attacks; Goblin (2 ATK) attacks Knight (3 DEF + defend): min damage = 1!
     const goblinTurnEvents: GameEvent[] = [];
     while (engine.getState().turnState === 'enemy_activation') {
       engine.executeNextEnemyAction();
@@ -547,11 +547,11 @@ describe('V4 Simulação de Balanceamento e Campanha Completa', () => {
         e.type === 'unitAttacked' && e.attackerId === 'goblin-1',
     );
     expect(goblinHit).toBeDefined();
-    expect(goblinHit!.damage).toBe(1); // Mesmo 2 ATK < 3 DEF e defend() ativo -> dano mínimo = 1
+    expect(goblinHit!.damage).toBe(1); // Even with 2 ATK < 3 DEF and defend() active -> min damage = 1
     expect(goblinHit!.wasGuarded).toBe(true);
 
-    // Verifica que mesmo sob golpes de um atacante fraco com FORT=12 e defend() todo turno,
-    // o tanque continua sofrendo >= 1 de dano por golpe (nunca fica invulnerável)
+    // Verify that even under hits from a weak attacker with FORT=12 and defend() every turn,
+    // the tank still takes >= 1 damage per hit (never invulnerable)
     const minDamageEngine = new GameEngine({
       gridSize: 8,
       obstacles: [],
@@ -564,7 +564,7 @@ describe('V4 Simulação de Balanceamento e Campanha Completa', () => {
           id: 'knight-tank',
           type: 'knight',
           attributes: fortKnight.attributes,
-          hp: 5, // HP baixo para confirmar que eventualmente morre por dano mínimo 1
+          hp: 5, // Low HP to confirm it eventually dies from minimum 1 damage
           maxHp: fortKnight.maxHp,
           unspentPoints: 0,
         },
@@ -606,11 +606,11 @@ describe('V4 Simulação de Balanceamento e Campanha Completa', () => {
     campaign.startNewCampaign();
     expect(storage.getItem(CAMPAIGN_SAVE_KEY)).not.toBeNull();
 
-    // Plano determinístico de evolução entre fases (1 ponto por herói após cada vitória 1..4)
+    // Deterministic upgrade plan between stages (1 point per hero after each victory 1..4)
     const upgradePlan: Record<number, Record<string, AttributeKey>> = {
-      1: { 'knight-1': 'str', 'archer-1': 'dex', 'mage-1': 'int', 'cleric-1': 'int' }, // todos +1 ofensivo/cura
-      2: { 'knight-1': 'fort', 'archer-1': 'fort', 'mage-1': 'fort', 'cleric-1': 'fort' }, // sobrevivência no meio da campanha
-      3: { 'knight-1': 'fort', 'archer-1': 'dex', 'mage-1': 'int', 'cleric-1': 'int' }, // Knight fort 8 (+1 DEF!), outros sobem principal
+      1: { 'knight-1': 'str', 'archer-1': 'dex', 'mage-1': 'int', 'cleric-1': 'int' }, // all +1 offense/heal
+      2: { 'knight-1': 'fort', 'archer-1': 'fort', 'mage-1': 'fort', 'cleric-1': 'fort' }, // mid-campaign survival
+      3: { 'knight-1': 'fort', 'archer-1': 'dex', 'mage-1': 'int', 'cleric-1': 'int' }, // Knight fort 8 (+1 DEF!), others raise primary
       4: { 'knight-1': 'str', 'archer-1': 'dex', 'mage-1': 'int', 'cleric-1': 'int' },
     };
 
@@ -688,8 +688,8 @@ describe('V4 Simulação de Balanceamento e Campanha Completa', () => {
         });
         expect(preparedAttacks.length).toBeGreaterThanOrEqual(2);
         expect(resolvedAttacks.length).toBeGreaterThanOrEqual(2);
-        expect(resolvedAttacks.some((e) => e.skillName === 'Golpe das Cinzas')).toBe(true);
-        expect(resolvedAttacks.some((e) => e.skillName === 'Erupção das Cinzas')).toBe(true);
+        expect(resolvedAttacks.some((e) => e.skillName === 'Ashen Cleave')).toBe(true);
+        expect(resolvedAttacks.some((e) => e.skillName === 'Ashen Eruption')).toBe(true);
       }
     }
 

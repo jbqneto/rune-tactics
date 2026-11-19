@@ -1,14 +1,14 @@
-# Sistema de Combate — Rune Tactics V4 (The Ashen Campaign)
+# Combat System — Rune Tactics V4 (The Ashen Campaign)
 
-Este documento especifica a fórmula centralizada de dano, a unificação da ação **Defender**, a fórmula de cura escalada por atributo e o ciclo completo de **Ataques Anunciados (`PendingAttack`)**. Toda lógica reside em `src/game/combat/CombatSystem.ts`, `src/game/turns/TurnSystem.ts` e `src/game/GameEngine.ts`.
+This document specifies the centralized damage formula, the unification of the **Defend** action, the attribute-scaled healing formula, and the full lifecycle of **Telegraphed Attacks (`PendingAttack`)**. All logic resides in `src/game/combat/CombatSystem.ts`, `src/game/turns/TurnSystem.ts`, and `src/game/GameEngine.ts`.
 
 ---
 
-## 1. Fórmula Centralizada de Dano
+## 1. Centralized Damage Formula
 
-Todo dano causado em combate — seja ataque básico (`resolveAttack`), habilidade ofensiva (`resolveSkill`) ou ataque anunciado (`resolvePendingAttack`) — passa por uma única função pura centralizada em `CombatSystem.ts` (`computeDamage`).
+All combat damage — whether basic attack (`resolveAttack`), offensive skill (`resolveSkill`), or telegraphed attack (`resolvePendingAttack`) — goes through a single centralized pure function in `CombatSystem.ts` (`computeDamage`).
 
-### Equação Completa
+### Full Equation
 
 ```ts
 const mainAttr = getAttributeForAttack(attacker.attributes, attackKind);
@@ -20,49 +20,49 @@ const finalDamage = target.isGuarding
   : damageBeforeGuard;
 ```
 
-### Parâmetros por Origem
+### Parameters by Source
 
-| Origem do golpe | `basePower` | `attackKind` |
+| Hit Source | `basePower` | `attackKind` |
 |---|---|---|
-| Ataque básico (`resolveAttack`) | `attacker.basePower` | `attacker.attackKind` |
-| Habilidade ofensiva (`resolveSkill`) | `skill.damage` | `skill.attackKind` |
-| Ataque anunciado (`PendingAttack`) | `pending.basePower` | `pending.attackKind` |
+| Basic attack (`resolveAttack`) | `attacker.basePower` | `attacker.attackKind` |
+| Offensive skill (`resolveSkill`) | `skill.damage` | `skill.attackKind` |
+| Telegraphed attack (`PendingAttack`) | `pending.basePower` | `pending.attackKind` |
 
-### Garantias e Casos de Borda
+### Guarantees and Edge Cases
 
-- **Piso mínimo de dano = 1**: mesmo que `totalDefense >= attackPower`, `damageBeforeGuard` é no mínimo `1`, e mesmo que `target.isGuarding` esteja ativo com `damageBeforeGuard === 1`, `Math.max(1, Math.ceil(1 * 0.5)) === 1`. Todo ataque que acerta causa ao menos `1` de dano.
-- **Arredondamento de defesa**: `Math.ceil(damageBeforeGuard * 0.5)` arredonda metade para cima (`3 -> 2`, `4 -> 2`, `5 -> 3`).
-- **HP resultante**: `target.hp = Math.max(0, target.hp - finalDamage)`. Se `target.hp === 0`, `target.alive = false`, `target.isGuarding = false` e emite `unitDied`.
-
----
-
-## 2. Ação Defender (`defend()`) — Unificação na V4
-
-Na V3 existia um protótipo de `defend()` que somava escudo numérico (`GUARD_SHIELD = 2` e `SHIELD_WALL_BONUS = 1`). **Na V4, `defend()` é unificado na postura defensiva pura de 50% de mitigação**, sem escudo numérico absorvedor (`shield`) nem bônus de Muralha em adjacentes.
-
-### Regras da Ação Defender
-
-1. **Consumo de ação**: `defend()` substitui o ataque básico ou habilidade na ativação (`unit.hasAttacked = true`).
-2. **Ordem livre no turno**:
-   - Pode ser usada **antes de mover** (`hasMoved === false`, `hasAttacked === false`): ativa a postura defensiva e mantém a ativação aberta para que a unidade ainda possa se mover ou encerrar manualmente.
-   - Pode ser usada **depois de mover** (`hasMoved === true`, `hasAttacked === false`): ativa a postura defensiva e encerra automaticamente a ativação (`hasMoved && hasAttacked`), passando a vez adiante.
-   - Se `unit.hasAttacked === true`, é recusada com `{ ok: false, reason }` sem mutar o estado nem emitir eventos.
-3. **Efeito**: define `unit.isGuarding = true` e emite `{ type: 'unitGuarded', unitId: unit.id }`.
-4. **Duração exata**:
-   - Permanece ativa durante todo o restante da rodada atual e início da próxima rodada **até o início da próxima ativação da própria unidade** (ou até sua morte).
-   - Quando `TurnSystem.advanceTurn` seleciona `nextUnit` para iniciar sua nova ativação, define `nextUnit.isGuarding = false` antes de emitir `activationStarted` (e antes de resolver qualquer ação do novo turno).
-   - Nota de caso extremo: se `nextUnit` havia preparado um `PendingAttack` e usou Defender antes? Não é possível no mesmo turno porque preparar e defender consomem `hasAttacked`; porém, se uma unidade estiver defendendo e sofrer um ataque anunciado de um inimigo antes de sua próxima ativação, sua `isGuarding === true` reduz o dano do ataque anunciado em 50%!
-5. **Desfazer movimento (`undoMove`)**: assim como atacar ou usar habilidade, executar `defend()` após mover limpa `undoSnapshot` (`canUndoMove` passa a `false`), pois a ação tática já foi tomada.
-6. **Compatibilidade e limpeza do protótipo V3**:
-   - Remover `GUARD_SHIELD` e `SHIELD_WALL_BONUS` de `src/config/gameConfig.ts`.
-   - Remover `shield` de `UnitState` e `shieldAbsorbed` de `unitAttacked` em `src/shared/types.ts`, simplificando `unitGuarded` para `{ type: 'unitGuarded'; unitId: string }` (e adicionando `wasGuarded?: boolean` opcional em `unitAttacked` para feedback de mitigação no HUD/renderer).
-   - Atualizar `tests/defend.test.ts`, `UnitRenderer.ts` (exibir `shieldAura` quando `unit.alive && unit.isGuarding`) e `HudManager.ts` (badge `🛡 Defesa (-50%)` quando `unit.isGuarding`).
+- **Minimum damage floor = 1**: even if `totalDefense >= attackPower`, `damageBeforeGuard` is at least `1`, and even when `target.isGuarding` is active with `damageBeforeGuard === 1`, `Math.max(1, Math.ceil(1 * 0.5)) === 1`. Every landed attack deals at least `1` damage.
+- **Guard rounding**: `Math.ceil(damageBeforeGuard * 0.5)` rounds halves up (`3 -> 2`, `4 -> 2`, `5 -> 3`).
+- **Resulting HP**: `target.hp = Math.max(0, target.hp - finalDamage)`. If `target.hp === 0`, `target.alive = false`, `target.isGuarding = false`, and `unitDied` is emitted.
 
 ---
 
-## 3. Cura (`Healing Light` e `Dark Mend`)
+## 2. Defend Action (`defend()`) — V4 Unification
 
-Habilidades com `targetTeam === 'ally'` aplicam a fórmula de cura escalada por `INT`:
+In V3 there was a prototype `defend()` that added a numeric shield (`GUARD_SHIELD = 2` and `SHIELD_WALL_BONUS = 1`). **In V4, `defend()` is unified into a pure 50% mitigation defensive stance**, with no absorbing numeric shield (`shield`) and no adjacent Shield Wall bonus.
+
+### Defend Action Rules
+
+1. **Action consumption**: `defend()` replaces the basic attack or skill for that activation (`unit.hasAttacked = true`).
+2. **Free turn order**:
+   - Can be used **before moving** (`hasMoved === false`, `hasAttacked === false`): activates the defensive stance and keeps the activation open so the unit can still move or end manually.
+   - Can be used **after moving** (`hasMoved === true`, `hasAttacked === false`): activates the defensive stance and automatically ends the activation (`hasMoved && hasAttacked`), passing the turn forward.
+   - If `unit.hasAttacked === true`, it is rejected with `{ ok: false, reason }` without mutating state or emitting events.
+3. **Effect**: sets `unit.isGuarding = true` and emits `{ type: 'unitGuarded', unitId: unit.id }`.
+4. **Exact duration**:
+   - Remains active for the remainder of the current round and the start of the next round **until the start of the unit's own next activation** (or until its death).
+   - When `TurnSystem.advanceTurn` selects `nextUnit` to start its new activation, it sets `nextUnit.isGuarding = false` before emitting `activationStarted` (and before resolving any actions of the new turn).
+   - Edge-case note: can `nextUnit` have prepared a `PendingAttack` and used Defend before? Not on the same turn, because both preparing and defending consume `hasAttacked`; however, if a unit is defending and gets hit by an enemy's telegraphed attack before its next activation, `isGuarding === true` reduces the telegraphed attack's damage by 50%!
+5. **Undo move (`undoMove`)**: just like attacking or using a skill, executing `defend()` after moving clears `undoSnapshot` (`canUndoMove` becomes `false`), since the tactical action has already been taken.
+6. **V3 prototype cleanup and compatibility**:
+   - Removed `GUARD_SHIELD` and `SHIELD_WALL_BONUS` from `src/config/gameConfig.ts`.
+   - Removed `shield` from `UnitState` and `shieldAbsorbed` from `unitAttacked` in `src/shared/types.ts`, simplifying `unitGuarded` to `{ type: 'unitGuarded'; unitId: string }` (and adding optional `wasGuarded?: boolean` on `unitAttacked` for mitigation feedback in HUD/renderer).
+   - Updated `tests/defend.test.ts`, `UnitRenderer.ts` (displays `shieldAura` when `unit.alive && unit.isGuarding`), and `HudManager.ts` (shows `🛡 Defending (-50%)` badge when `unit.isGuarding`).
+
+---
+
+## 3. Healing (`Healing Light` and `Dark Mend`)
+
+Skills with `targetTeam === 'ally'` apply the `INT`-scaled healing formula:
 
 ```ts
 const healPower = skill.heal + offensiveBonus(caster.attributes.int);
@@ -70,23 +70,23 @@ const actualHeal = Math.min(healPower, target.maxHp - target.hp);
 target.hp += actualHeal;
 ```
 
-### Regras de Cura
+### Healing Rules
 
-- Só é válida para alvos **vivos** (`target.alive === true`), da **mesma equipe** do conjurador (`target.team === caster.team`) e com `target.hp < target.maxHp`.
-- **Nunca cura unidades mortas** (`!target.alive`).
-- O conjurador pode curar a si mesmo (`manhattan === 0`).
-- A cura nunca ultrapassa `target.maxHp`.
-- Se `skill.range > 1`, exige linha de visão (`hasLineOfSight`) do conjurador até a célula alvo.
-- `isGuarding` no alvo **não** reduz cura recebida.
-- Consome `hasAttacked = true` e aplica `skillCooldown = skill.cooldown`.
+- Valid only for **living** targets (`target.alive === true`), on the **same team** as the caster (`target.team === caster.team`), with `target.hp < target.maxHp`.
+- **Never heals dead units** (`!target.alive`).
+- The caster may heal themselves (`manhattan === 0`).
+- Healing never exceeds `target.maxHp`.
+- If `skill.range > 1`, requires line of sight (`hasLineOfSight`) from the caster to the target cell.
+- `isGuarding` on the target **does not** reduce incoming healing.
+- Consumes `hasAttacked = true` and sets `skillCooldown = skill.cooldown`.
 
 ---
 
-## 4. Ataques Anunciados (`PendingAttack`)
+## 4. Telegraphed Attacks (`PendingAttack`)
 
-Para criar leitura tática em encontros avançados e no combate de chefe (`ashen-guardian`), ataques de alto impacto em área usam um ciclo em dois turnos chamado **Ataque Anunciado (`PendingAttack`)**.
+To create tactical readability in advanced encounters and the boss fight (`ashen-guardian`), high-impact area attacks use a two-turn cycle called **Telegraphed Attack (`PendingAttack`)**.
 
-### Estrutura de Dados (`src/shared/types.ts`)
+### Data Structure (`src/shared/types.ts`)
 
 ```ts
 export interface PendingAttack {
@@ -100,39 +100,39 @@ export interface PendingAttack {
 }
 ```
 
-### Ciclo de Vida Completo
+### Full Lifecycle
 
-1. **Preparação (Ativação $N$ do conjurador)**:
-   - O conjurador (via decisão da IA) escolhe preparar o ataque em um conjunto fixo de células válidas dentro da grade (`targetCells`).
-   - A preparação **consome a ação tática do turno** (`caster.hasAttacked = true`) e aplica a recarga da habilidade (`caster.skillCooldown = cooldown`).
-   - Cria um `PendingAttack` com ID determinístico (ex.: `${caster.id}-pending-${round}-${counter}`) e o insere em `pendingAttacks`.
-   - Emite `{ type: 'attackPrepared', pendingAttack }` (cópia imutável das coordenadas).
-   - `GameStateSnapshot.pendingAttacks` expõe cópia da lista para que `BoardRenderer` destaque todas as `targetCells` como **células perigosas** durante toda a rodada até a resolução ou cancelamento.
+1. **Preparation (Caster's Activation $N$)**:
+   - The caster (via AI decision) chooses to prepare the attack on a fixed set of valid cells within the grid (`targetCells`).
+   - Preparation **consumes the turn's tactical action** (`caster.hasAttacked = true`) and applies the skill cooldown (`caster.skillCooldown = cooldown`).
+   - Creates a `PendingAttack` with a deterministic ID (e.g., `${caster.id}-pending-${round}-${counter}`) and inserts it into `pendingAttacks`.
+   - Emits `{ type: 'attackPrepared', pendingAttack }` (immutable copy of coordinates).
+   - `GameStateSnapshot.pendingAttacks` exposes a copy of the list so `BoardRenderer` highlights all `targetCells` as **danger cells** throughout the round until resolution or cancellation.
 
-2. **Reação do Jogador (entre a Ativação $N$ e a Ativação $N+1$ do conjurador)**:
-   - O jogador vê exatamente quais células estão marcadas e sabe qual conjurador está canalizando o golpe.
-   - O jogador possui três respostas táticas reais:
-     1. **Sair da área** com `moveSelectedUnit` ou `smartAttack`;
-     2. **Usar `Defend`** para cortar o dano do impacto pela metade (`-50%`);
-     3. **Abater o conjurador** antes de sua próxima ativação para cancelar o golpe!
+2. **Player Reaction (between Caster's Activation $N$ and Activation $N+1$)**:
+   - The player sees the exact marked cells and knows which caster is channeling the strike.
+   - The player has three meaningful tactical responses:
+     1. **Move out of the area** with `moveSelectedUnit` or `smartAttack`;
+     2. **Use `Defend`** to cut the impact damage in half (`-50%`);
+     3. **Slay the caster** before its next activation to cancel the attack!
 
-3. **Cancelamento por Morte do Conjurador**:
-   - Se o conjurador morrer (`alive` virar `false`) antes do início de sua próxima ativação:
-   - Todos os `PendingAttack` com `casterId === deadUnit.id` são removidos imediatamente de `pendingAttacks` na própria ação que causou a morte.
-   - Para cada um, emite `{ type: 'attackCancelled', pendingAttackId, casterId, reason: 'caster_died' }` logo após `unitDied`.
-   - As células perigosas desaparecem do tabuleiro na mesma hora.
+3. **Cancellation on Caster Death**:
+   - If the caster dies (`alive` becomes `false`) before the start of its next activation:
+   - All `PendingAttack` entries with `casterId === deadUnit.id` are immediately removed from `pendingAttacks` during the action that caused the death.
+   - For each one, emits `{ type: 'attackCancelled', pendingAttackId, casterId, reason: 'caster_died' }` right after `unitDied`.
+   - The danger cells vanish from the board immediately.
 
-4. **Resolução (Início da próxima ativação do conjurador vivo)**:
-   - No exato momento em que `TurnSystem.advanceTurn` avança o cursor para o conjurador e ele está vivo (`nextUnit.alive === true`), após limpar `nextUnit.isGuarding = false` e emitir `activationStarted`:
-   - O motor (`GameEngine` delegando a `CombatSystem.resolvePendingAttacksForUnit`) localiza os `PendingAttack` com `casterId === nextUnit.id`, remove-os de `pendingAttacks` e os resolve **antes** de `nextUnit` executar as novas ações da ativação recém-iniciada.
-   - Para cada `PendingAttack`:
-     - Filtra todas as unidades **vivas da equipe adversária** (`u.alive && u.team !== caster.team`) cuja `pos` esteja em `pending.targetCells` (ataque anunciado inimigo **não** fere outros inimigos; preserva consistência com `Arcane Burst`).
-     - Emite primeiro o evento agrupador `{ type: 'pendingAttackResolved', pendingAttackId, casterId, skillName, targetCells, affectedUnitIds }`.
-     - Em seguida, para cada vítima afetada, aplica `computeDamage` com `pending.basePower` e `pending.attackKind` contra a defesa e `isGuarding` atuais da vítima, emitindo `unitAttacked` (com `pendingAttackId`, `wasGuarded` se aplicável) e, se `hp === 0`, `unitDied`.
-   - Imediatamente após resolver os ataques pendentes, verifica fim de batalha (`checkBattleEnd`). Se todos os heróis caíram no impacto, emite `battleEnded` (`winner: 'enemy'`) e o conjurador **não** inicia nenhuma ação adicional.
-   - Se a batalha continuar, a ativação normal do conjurador prossegue com `hasMoved = false` e `hasAttacked = false`.
+4. **Resolution (Start of the living caster's next activation)**:
+   - At the exact moment `TurnSystem.advanceTurn` advances the cursor to the caster and it is alive (`nextUnit.alive === true`), after clearing `nextUnit.isGuarding = false` and emitting `activationStarted`:
+   - The engine (`GameEngine` delegating to `CombatSystem.resolvePendingAttacksForUnit`) finds all `PendingAttack` entries with `casterId === nextUnit.id`, removes them from `pendingAttacks`, and resolves them **before** `nextUnit` executes any new actions for the newly started activation.
+   - For each `PendingAttack`:
+     - Filters all **living units of the opposing team** (`u.alive && u.team !== caster.team`) whose `pos` is in `pending.targetCells` (an enemy telegraphed attack **does not** damage other enemies; consistent with `Arcane Burst`).
+     - First emits the grouping event `{ type: 'pendingAttackResolved', pendingAttackId, casterId, skillName, targetCells, affectedUnitIds }`.
+     - Next, for each affected victim, applies `computeDamage` with `pending.basePower` and `pending.attackKind` against the victim's current defense and `isGuarding`, emitting `unitAttacked` (with `pendingAttackId`, and `wasGuarded` if applicable) and, if `hp === 0`, `unitDied`.
+   - Immediately after resolving pending attacks, checks for battle end (`checkBattleEnd`). If all heroes fell from the impact, emits `battleEnded` (`winner: 'enemy'`) and the caster **does not** start any additional actions.
+   - If the battle continues, the caster's normal activation proceeds with `hasMoved = false` and `hasAttacked = false`.
 
-### Garantia de Contiguidade de Eventos
+### Event Contiguity Guarantee
 
-Assim como nas habilidades (`skillUsed` seguido de `unitAttacked`), os eventos de um `PendingAttack` resolvido chegam sempre contíguos no mesmo lote de `consumeEvents()`:
-`pendingAttackResolved` → `unitAttacked` (para cada atingido) → `unitDied` (para cada morto), permitindo que `UnitRenderer` anime uma única explosão/impacto simultâneo em toda a zona marcada.
+Just like skills (`skillUsed` followed by `unitAttacked`), events from a resolved `PendingAttack` always arrive contiguously in the same `consumeEvents()` batch:
+`pendingAttackResolved` → `unitAttacked` (for each victim) → `unitDied` (for each casualty), allowing `UnitRenderer` to animate a single simultaneous explosion/impact across the entire marked zone.

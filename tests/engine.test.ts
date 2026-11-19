@@ -17,17 +17,17 @@ import {
 
 const SKELETON = 'melee-skeleton-1';
 
-/** Guerreiro em (1,1) e um esqueleto adjacente em (1,2), sem obstáculos. */
+/** Knight at (1,1) and an adjacent skeleton at (1,2), no obstacles. */
 const duel = () => new GameEngine({ obstacles: [], units: [knightAt(1, 1), meleeAt(1, 2)] });
 
-/** Guerreiro e arqueira contra um esqueleto adjacente ao guerreiro e um blindado distante. */
+/** Knight and archer against a skeleton adjacent to the knight and a distant armored skeleton. */
 const squad = () =>
   new GameEngine({ obstacles: [], units: [knightAt(1, 1), archerAt(0, 0), meleeAt(1, 2), armoredAt(7, 7)] });
 
 const types = (events: GameEvent[]) => events.map((e) => e.type);
 
-describe('GameEngine: estado inicial e turnOrder fixo (V2.1)', () => {
-  it('começa em player_unit_active, rodada 1, travado em knight-1, com ordem fixa intercalada de 10 unidades', () => {
+describe('GameEngine: initial state and fixed turnOrder (V2.1)', () => {
+  it('starts in player_unit_active, round 1, locked on knight-1, with fixed interleaved order of 10 units', () => {
     const engine = new GameEngine();
     const state = engine.getState();
     expect(state).toMatchObject({
@@ -61,7 +61,7 @@ describe('GameEngine: estado inicial e turnOrder fixo (V2.1)', () => {
     expect(engine.consumeEvents()).toEqual([]);
   });
 
-  it('percorre a ordem fixa exata de 10 unidades e repete no Round 2', () => {
+  it('walks through the exact fixed order of 10 units and repeats in Round 2', () => {
     const engine = new GameEngine();
     const expectedOrder = engine.getState().turnOrder;
     const round1Actors: string[] = [];
@@ -89,7 +89,7 @@ describe('GameEngine: estado inicial e turnOrder fixo (V2.1)', () => {
     });
   });
 
-  it('expõe os obstáculos e garante cópias isoladas em getState', () => {
+  it('exposes obstacles and guarantees isolated copies in getState', () => {
     const engine = new GameEngine({ mapId: 'ruins', randomizeSpawns: false });
     const state = engine.getState();
     expect(state.obstacleDefs).toEqual(OBSTACLES);
@@ -100,26 +100,26 @@ describe('GameEngine: estado inicial e turnOrder fixo (V2.1)', () => {
   });
 });
 
-describe('GameEngine: bloqueio de troca manual (selectUnit)', () => {
-  it('recusa trocar para outro aliado ou limpar seleção, mantendo activeUnitId intacto', () => {
+describe('GameEngine: manual switch lock (selectUnit)', () => {
+  it('rejects switching to another ally or clearing selection, keeping activeUnitId intact', () => {
     const engine = squad();
     expect(engine.selectUnit('knight-1')).toEqual({ ok: true });
-    expect(engine.selectUnit('archer-1')).toEqual({ ok: false, reason: 'Não é possível alterar a unidade ativa.' });
-    expect(engine.selectUnit(null)).toEqual({ ok: false, reason: 'Não é possível alterar a unidade ativa.' });
+    expect(engine.selectUnit('archer-1')).toEqual({ ok: false, reason: 'Cannot change the active unit.' });
+    expect(engine.selectUnit(null)).toEqual({ ok: false, reason: 'Cannot change the active unit.' });
     expect(engine.selectUnit(SKELETON).ok).toBe(false);
     expect(engine.getState()).toMatchObject({
       activeUnitId: 'knight-1',
       selectedUnitId: 'knight-1',
     });
 
-    // No turno inimigo também recusa
+    // Also rejects during enemy turn
     engine.endPlayerTurn();
-    expect(engine.selectUnit('knight-1')).toEqual({ ok: false, reason: 'Não é possível alterar a unidade ativa.' });
+    expect(engine.selectUnit('knight-1')).toEqual({ ok: false, reason: 'Cannot change the active unit.' });
   });
 });
 
-describe('GameEngine: encerramento automático e manual (cenários A a E)', () => {
-  it('Cenário A: mover -> atacar encerra automaticamente e passa para o próximo ator na turnOrder', () => {
+describe('GameEngine: automatic and manual turn ending (scenarios A to E)', () => {
+  it('Scenario A: move -> attack ends automatically and advances to the next actor in turnOrder', () => {
     const engine = duel();
     expect(engine.moveSelectedUnit({ x: 2, y: 2 })).toEqual({ ok: true });
     expect(engine.getState()).toMatchObject({
@@ -145,7 +145,7 @@ describe('GameEngine: encerramento automático e manual (cenários A a E)', () =
     ]);
   });
 
-  it('Cenário B: atacar -> mover continua aberta após ataque e encerra automaticamente após mover', () => {
+  it('Scenario B: attack -> move stays open after attack and ends automatically after move', () => {
     const engine = duel();
     expect(engine.attackTarget(SKELETON)).toEqual({ ok: true });
     expect(engine.getState()).toMatchObject({
@@ -167,7 +167,7 @@ describe('GameEngine: encerramento automático e manual (cenários A a E)', () =
     ]);
   });
 
-  it('Cenário B (variante habilidade): useSkill -> mover encerra após mover', () => {
+  it('Scenario B (skill variant): useSkill -> move ends after move', () => {
     const engine = duel();
     expect(engine.useSkill({ x: 1, y: 2 })).toEqual({ ok: true });
     expect(engine.getState().turnState).toBe('player_unit_active');
@@ -175,7 +175,7 @@ describe('GameEngine: encerramento automático e manual (cenários A a E)', () =
     expect(engine.getState().turnState).toBe('enemy_activation');
   });
 
-  it('Cenários C, D e E: apenas 1 ação (ou 0) mantém aberta até endPlayerTurn()', () => {
+  it('Scenarios C, D, and E: only 1 action (or 0) stays open until endPlayerTurn()', () => {
     const engine = duel();
     engine.moveSelectedUnit({ x: 2, y: 1 });
     expect(engine.getState().turnState).toBe('player_unit_active');
@@ -185,14 +185,14 @@ describe('GameEngine: encerramento automático e manual (cenários A a E)', () =
       activeUnitId: SKELETON,
     });
 
-    // No turno inimigo endPlayerTurn é recusado
+    // During enemy turn endPlayerTurn is rejected
     expect(engine.endPlayerTurn().ok).toBe(false);
   });
 
-  it('ações inválidas nunca consomem recursos nem avançam a vez', () => {
+  it('invalid actions never consume resources or advance the turn', () => {
     const engine = duel();
     expect(engine.moveSelectedUnit({ x: 11, y: 11 }).ok).toBe(false);
-    expect(engine.attackTarget('inexistente').ok).toBe(false);
+    expect(engine.attackTarget('nonexistent').ok).toBe(false);
     expect(engine.useSkill({ x: 5, y: 5 }).ok).toBe(false);
     expect(unitOf(engine, 'knight-1')).toMatchObject({ hasMoved: false, hasAttacked: false });
     expect(engine.getState()).toMatchObject({
@@ -203,45 +203,45 @@ describe('GameEngine: encerramento automático e manual (cenários A a E)', () =
   });
 });
 
-describe('GameEngine: getAttackRangeCells e getSkillRangeCells (alcance e LoS)', () => {
-  it('getAttackRangeCells respeita alcance, obstáculos e linha de visão', () => {
+describe('GameEngine: getAttackRangeCells and getSkillRangeCells (range and LoS)', () => {
+  it('getAttackRangeCells respects range, obstacles, and line of sight', () => {
     const engine = new GameEngine({
       obstacles: [wall(0, 1), crate(1, 0)],
       units: [archerAt(0, 0), meleeAt(5, 5)],
     });
     const rangeCells = engine.getAttackRangeCells();
-    // (0,1) tem wall -> não está incluído e bloqueia (0,2) e (0,3)
+    // (0,1) has wall -> not included and blocks (0,2) and (0,3)
     expect(rangeCells).not.toContainEqual({ x: 0, y: 1 });
     expect(rangeCells).not.toContainEqual({ x: 0, y: 2 });
     expect(rangeCells).not.toContainEqual({ x: 0, y: 3 });
-    // (1,0) tem crate (obstáculo) -> não está incluído, mas NÃO bloqueia LoS para (2,0) e (3,0)
+    // (1,0) has crate (obstacle) -> not included, but does NOT block LoS to (2,0) and (3,0)
     expect(rangeCells).not.toContainEqual({ x: 1, y: 0 });
     expect(rangeCells).toContainEqual({ x: 2, y: 0 });
     expect(rangeCells).toContainEqual({ x: 3, y: 0 });
-    // Fora de alcance (manhattan 4)
+    // Out of range (manhattan 4)
     expect(rangeCells).not.toContainEqual({ x: 4, y: 0 });
-    // Para unidade inativa retorna []
+    // Inactive unit returns []
     expect(engine.getAttackRangeCells('melee-skeleton-1')).toEqual([]);
 
-    // Após atacar, retorna []
+    // After attacking, returns []
     const eng2 = new GameEngine({ obstacles: [], units: [archerAt(0, 0), meleeAt(0, 2)] });
     eng2.attackTarget('melee-skeleton-1');
     expect(eng2.getAttackRangeCells()).toEqual([]);
   });
 
-  it('getSkillRangeCells respeita alcance, LoS, recarga e inclui própria célula para healing-light', () => {
+  it('getSkillRangeCells respects range, LoS, cooldown, and includes own cell for healing-light', () => {
     const engine = new GameEngine({
       obstacles: [wall(0, 1)],
       units: [clericAt(0, 0), knightAt(2, 0), meleeAt(5, 5)],
     });
     const skillRange = engine.getSkillRangeCells();
-    expect(skillRange).toContainEqual({ x: 0, y: 0 }); // própria célula para cura
+    expect(skillRange).toContainEqual({ x: 0, y: 0 }); // own cell for healing
     expect(skillRange).toContainEqual({ x: 2, y: 0 });
     expect(skillRange).not.toContainEqual({ x: 0, y: 1 }); // wall
-    expect(skillRange).not.toContainEqual({ x: 0, y: 2 }); // bloqueado por wall
-    expect(engine.getSkillRangeCells('knight-1')).toEqual([]); // não é a unidade ativa
+    expect(skillRange).not.toContainEqual({ x: 0, y: 2 }); // blocked by wall
+    expect(engine.getSkillRangeCells('knight-1')).toEqual([]); // not the active unit
 
-    // Para habilidade de dano (Marked Shot), própria célula não é incluída
+    // For damage skill (Marked Shot), own cell is not included
     const engArcher = new GameEngine({
       obstacles: [],
       units: [archerAt(0, 0), meleeAt(0, 2)],
@@ -250,14 +250,14 @@ describe('GameEngine: getAttackRangeCells e getSkillRangeCells (alcance e LoS)',
     expect(archerSkillRange).not.toContainEqual({ x: 0, y: 0 });
     expect(archerSkillRange).toContainEqual({ x: 0, y: 2 });
 
-    // Em recarga retorna []
+    // On cooldown returns []
     engArcher.useSkill({ x: 0, y: 2 });
     expect(engArcher.getSkillRangeCells()).toEqual([]);
   });
 });
 
-describe('GameEngine: morte ignorada na turnOrder, cadáveres, vitória e derrota', () => {
-  it('pula unidade morta sem reordenar turnOrder e sem ativações duplicadas', () => {
+describe('GameEngine: death skipped in turnOrder, corpses, victory, and defeat', () => {
+  it('skips dead unit without reordering turnOrder and without duplicate activations', () => {
     const engine = new GameEngine({
       obstacles: [],
       units: [knightAt(0, 0), archerAt(0, 2), meleeAt(0, 1), armoredAt(7, 7)],
@@ -270,19 +270,19 @@ describe('GameEngine: morte ignorada na turnOrder, cadáveres, vitória e derrot
       'armored-skeleton-1',
     ]);
 
-    // knight-1 usa Runic Strike (3 dano) e encerra -> melee-1 (HP 2) ataca -> archer-1 mata melee-1
+    // knight-1 uses Runic Strike (3 damage) and ends -> melee-1 (HP 2) attacks -> archer-1 kills melee-1
     engine.useSkill({ x: 0, y: 1 });
     engine.endPlayerTurn();
     runEnemyTurn(engine);
     engine.consumeEvents();
 
     expect(engine.getState().activeUnitId).toBe('archer-1');
-    engine.attackTarget('melee-skeleton-1'); // mata melee-1!
+    engine.attackTarget('melee-skeleton-1'); // kills melee-1!
     engine.endPlayerTurn();
-    runEnemyTurn(engine); // armored-1 ativa e vira Round 2
+    runEnemyTurn(engine); // armored-1 activates and wraps to Round 2
     engine.consumeEvents();
 
-    // No Round 2, turnOrder permanece inalterada, mas melee-1 morto é pulado:
+    // In Round 2, turnOrder remains unchanged, but dead melee-1 is skipped:
     expect(engine.getState().turnOrder).toEqual([
       'knight-1',
       'melee-skeleton-1',
@@ -291,14 +291,14 @@ describe('GameEngine: morte ignorada na turnOrder, cadáveres, vitória e derrot
     ]);
     expect(engine.getState().activeUnitId).toBe('knight-1');
     engine.endPlayerTurn();
-    expect(engine.getState().activeUnitId).toBe('archer-1'); // pulou melee-skeleton-1!
+    expect(engine.getState().activeUnitId).toBe('archer-1'); // skipped melee-skeleton-1!
 
-    // Cadáver continua no grid em (0,1) e não bloqueia movimento
+    // Corpse remains on the grid at (0,1) and does not block movement
     expect(unitOf(engine, 'melee-skeleton-1')).toMatchObject({ alive: false, hp: 0, pos: { x: 0, y: 1 } });
     expect(engine.getPath({ x: 0, y: 0 }, { x: 0, y: 1 })).toEqual([{ x: 0, y: 0 }, { x: 0, y: 1 }]);
   });
 
-  it('vitória imediata no último golpe interrompe sem activationEnded nem turnChanged', () => {
+  it('immediate victory on final blow stops without activationEnded or turnChanged', () => {
     const engine = new GameEngine({
       obstacles: [],
       units: [knightAt(1, 1), archerAt(0, 2), meleeAt(1, 2)],
@@ -309,7 +309,7 @@ describe('GameEngine: morte ignorada na turnOrder, cadáveres, vitória e derrot
     engine.consumeEvents();
 
     expect(engine.getState().activeUnitId).toBe('archer-1');
-    engine.useSkill({ x: 1, y: 2 }); // 3 de dano, mata!
+    engine.useSkill({ x: 1, y: 2 }); // 3 damage, kills!
     expect(engine.getState()).toMatchObject({
       turnState: 'victory',
       phase: 'victory',
@@ -321,7 +321,7 @@ describe('GameEngine: morte ignorada na turnOrder, cadáveres, vitória e derrot
     expect(engine.executeNextEnemyAction()).toBe(false);
   });
 
-  it('reset() em qualquer estado restaura rodada 1 e índice 0', () => {
+  it('reset() in any state restores round 1 and index 0', () => {
     const engine = duel();
     engine.moveSelectedUnit({ x: 2, y: 1 });
     engine.endPlayerTurn();
@@ -340,13 +340,13 @@ describe('GameEngine: morte ignorada na turnOrder, cadáveres, vitória e derrot
   });
 });
 
-describe('GameEngine: invariantes em partida simulada (V2.1 12x12)', () => {
-  it('partida completa com 4 heróis vs 6 inimigos termina em vitória ou derrota respeitando turnOrder', () => {
+describe('GameEngine: invariants in simulated match (V2.1 12x12)', () => {
+  it('full match with 4 heroes vs 6 enemies ends in victory or defeat respecting turnOrder', () => {
     const engine = new GameEngine();
     let safety = 0;
 
     while (!['victory', 'defeat'].includes(engine.getState().turnState)) {
-      if (++safety > 600) throw new Error('Partida simulada não terminou');
+      if (++safety > 600) throw new Error('Simulated match did not finish');
       const state = engine.getState();
 
       expect(state.activeUnitId).not.toBeNull();

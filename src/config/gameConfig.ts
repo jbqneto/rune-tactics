@@ -21,21 +21,27 @@ export const CAMPAIGN_REVIVE_HP_RATIO = 0.25;
 export const CAMPAIGN_POINTS_PER_STAGE = 1;
 export const CAMPAIGN_SAVE_KEY = 'rune_tactics_v4_save';
 export const CAMPAIGN_SAVE_VERSION = 4;
+export const PVP_DEFAULT_MAP_ID = 'forgotten-swamp';
+export const PVP_TEAM_SIZE = 3;
+export const PVP_HERO_CLASSES = ['knight', 'archer', 'mage', 'cleric'] as const;
+export const PVP_TURN_DURATION_MS = 60_000;
+export const PVP_RECONNECT_GRACE_SECONDS = 90;
+export const PVP_INVITE_CODE_LENGTH = 8;
 
 const obstacles = (kind: ObstacleKind, blocksLos: boolean, cells: [number, number][]): ObstacleDef[] =>
   cells.map(([x, y]) => ({ pos: { x, y }, kind, blocksLos }));
 
 /**
- * Arena 12x12. Os heróis começam no sul (linhas 0 e 1) e os inimigos no norte (linhas 9 a 11).
+ * 12x12 arena. Heroes start in the south (rows 0 and 1) and enemies in the north (rows 9 to 11).
  *
- *   11  . . S . . . C . . . . .     # parede   (bloqueia movimento e visão)
- *   10  . . . M . A . . M . . .     O pilar    (bloqueia movimento e visão)
- *    9  . . . O . . c . O . G .     c caixote  (bloqueia só movimento)
- *    8  . b . . . . . . . . c .     b barril   (bloqueia só movimento)
+ *   11  . . S . . . C . . . . .     # wall    (blocks movement and line of sight)
+ *   10  . . . M . A . . M . . .     O pillar  (blocks movement and line of sight)
+ *    9  . . . O . . c . O . G .     c crate   (blocks movement only)
+ *    8  . b . . . . . . . . c .     b barrel  (blocks movement only)
  *    7  . . . . . . . . . . . .
- *    6  # # . . # # # # . # # #     portão oeste (x=2,3) e passagem estreita leste (x=8)
+ *    6  # # . . # # # # . # # #     west gate (x=2,3) and narrow east passage (x=8)
  *    5  . . . . . . . . . . . .
- *    4  . . . . . c c . . . . .     barricada baixa no centro do pátio sul
+ *    4  . . . . . c c . . . . .     low barricade in the center of the south courtyard
  *    3  . . . O . . . . O . . .
  *    2  . . . . . . . . . . b .
  *    1  . . . . K . H . . . . .
@@ -43,7 +49,7 @@ const obstacles = (kind: ObstacleKind, blocksLos: boolean, cells: [number, numbe
  *       0 1 2 3 4 5 6 7 8 9 10 11
  */
 export const OBSTACLES: ObstacleDef[] = [
-  // Muralha central: divide a arena e deixa duas passagens.
+  // Central wall: splits the arena and leaves two passages.
   ...obstacles('wall', true, [
     [0, 6],
     [1, 6],
@@ -55,14 +61,14 @@ export const OBSTACLES: ObstacleDef[] = [
     [10, 6],
     [11, 6],
   ]),
-  // Colunas: cobertura total nos dois pátios.
+  // Pillars: full cover in both courtyards.
   ...obstacles('pillar', true, [
     [3, 3],
     [8, 3],
     [3, 9],
     [8, 9],
   ]),
-  // Barreiras baixas: seguram o avanço, mas dá para atirar por cima.
+  // Low barriers: block movement, but units can shoot over them.
   ...obstacles('crate', false, [
     [5, 4],
     [6, 4],
@@ -89,15 +95,23 @@ export interface MapConfig {
 export const MAPS: MapConfig[] = [
   {
     id: 'ruins',
-    name: 'Ruínas Atuais',
+    name: 'Ancient Ruins',
     gridSize: GRID_SIZE,
     obstacles: OBSTACLES,
     playerSpawnRows: [0, 1],
     enemySpawnRows: [10, 11],
   },
   {
+    id: 'dorter-ruins',
+    name: 'Dorter Ruins',
+    gridSize: GRID_SIZE,
+    obstacles: [],
+    playerSpawnRows: [0, 1],
+    enemySpawnRows: [10, 11],
+  },
+  {
     id: 'fortress',
-    name: 'Fortaleza Abandonada',
+    name: 'Abandoned Fortress',
     gridSize: GRID_SIZE,
     obstacles: [
       ...obstacles('wall', true, [
@@ -134,7 +148,7 @@ export const MAPS: MapConfig[] = [
   },
   {
     id: 'courtyard',
-    name: 'Pátio das Ruínas',
+    name: 'Ruined Courtyard',
     gridSize: GRID_SIZE,
     obstacles: [
       ...obstacles('pillar', true, [
@@ -163,7 +177,7 @@ export const MAPS: MapConfig[] = [
   },
   {
     id: 'catacombs',
-    name: 'Catacumbas Cruzadas',
+    name: 'Crossed Catacombs',
     gridSize: GRID_SIZE,
     obstacles: [
       ...obstacles('wall', true, [
@@ -202,7 +216,7 @@ export const MAPS: MapConfig[] = [
   },
   {
     id: 'sanctuary',
-    name: 'Santuário Rúnico',
+    name: 'Runic Sanctuary',
     gridSize: GRID_SIZE,
     obstacles: [
       ...obstacles('wall', true, [
@@ -239,7 +253,7 @@ export const MAPS: MapConfig[] = [
   },
   {
     id: 'gauntlet',
-    name: 'Corredor da Forja',
+    name: 'Forge Gauntlet',
     gridSize: GRID_SIZE,
     obstacles: [
       ...obstacles('wall', true, [
@@ -278,7 +292,7 @@ export const MAPS: MapConfig[] = [
   },
   {
     id: 'forgotten-swamp',
-    name: 'Pântano Esquecido',
+    name: 'Forgotten Swamp',
     gridSize: GRID_SIZE,
     theme: 'swamp',
     obstacles: [
@@ -334,7 +348,7 @@ export const MAPS: MapConfig[] = [
   },
   {
     id: 'corrupted-sanctuary',
-    name: 'Santuário Corrompido',
+    name: 'Corrupted Sanctuary',
     gridSize: GRID_SIZE,
     theme: 'sanctuary',
     obstacles: [
@@ -375,19 +389,19 @@ export const MAPS: MapConfig[] = [
 export interface SkillDef {
   id: SkillId;
   name: string;
-  /** Quem a habilidade afeta. 'ally' inclui o próprio lançador. */
+  /** Who the skill affects. 'ally' includes the caster itself. */
   targetTeam: 'enemy' | 'ally';
-  /** Dano base em cada inimigo atingido. 0 para habilidades de cura. */
+  /** Base damage dealt to each enemy hit. 0 for healing skills. */
   damage: number;
-  /** HP base devolvido ao aliado, até o `maxHp` dele. 0 para habilidades de dano. */
+  /** Base HP restored to the ally, up to its `maxHp`. 0 for damage skills. */
   heal: number;
-  /** Tipo de ataque para escalonamento de dano em habilidades ofensivas. */
+  /** Attack type for damage scaling on offensive skills. */
   attackKind?: AttackKind;
-  /** Distância de Manhattan máxima até a célula alvo. Acima de 1, exige linha de visão. */
+  /** Maximum Manhattan distance to the target cell. Above 1, requires line of sight. */
   range: number;
-  /** Rodadas até poder usar de novo. */
+  /** Rounds until it can be used again. */
   cooldown: number;
-  /** 'cross' atinge a célula alvo e as quatro ortogonalmente adjacentes. */
+  /** 'cross' hits the target cell and its four orthogonally adjacent cells. */
   area: 'single' | 'cross';
   icon?: string;
 }
@@ -467,7 +481,7 @@ export interface UnitStats {
 
 export const UNIT_STATS: Record<UnitType, UnitStats> = {
   knight: {
-    name: 'Guerreiro',
+    name: 'Knight',
     baseHp: 8,
     baseArmor: 1,
     basePower: 2,
@@ -479,7 +493,7 @@ export const UNIT_STATS: Record<UnitType, UnitStats> = {
     portraitPath: '/assets/portraits/knight.png',
   },
   archer: {
-    name: 'Arqueira',
+    name: 'Archer',
     baseHp: 8,
     baseArmor: 0,
     basePower: 2,
@@ -491,7 +505,7 @@ export const UNIT_STATS: Record<UnitType, UnitStats> = {
     portraitPath: '/assets/portraits/archer.png',
   },
   mage: {
-    name: 'Mago',
+    name: 'Mage',
     baseHp: 7,
     baseArmor: 0,
     basePower: 2,
@@ -503,7 +517,7 @@ export const UNIT_STATS: Record<UnitType, UnitStats> = {
     portraitPath: '/assets/portraits/mage.png',
   },
   cleric: {
-    name: 'Clérigo',
+    name: 'Cleric',
     baseHp: 7,
     baseArmor: 1,
     basePower: 2,
@@ -611,7 +625,7 @@ export const UNIT_STATS: Record<UnitType, UnitStats> = {
     portraitPath: '/assets/portraits/necromancer-acolyte.png',
   },
   'ashen-guardian': {
-    name: 'Guardião das Cinzas',
+    name: 'Ashen Guardian',
     baseHp: 20,
     baseArmor: 1,
     basePower: 4,
@@ -635,7 +649,7 @@ export interface BossPhaseAttackDef {
 
 export const ASHEN_GUARDIAN_PHASE_ATTACKS: Record<1 | 2, BossPhaseAttackDef> = {
   1: {
-    skillName: 'Golpe das Cinzas',
+    skillName: 'Ashen Cleave',
     basePower: 4,
     attackKind: 'magic',
     range: 3,
@@ -643,7 +657,7 @@ export const ASHEN_GUARDIAN_PHASE_ATTACKS: Record<1 | 2, BossPhaseAttackDef> = {
     area: 'cross',
   },
   2: {
-    skillName: 'Erupção das Cinzas',
+    skillName: 'Ashen Eruption',
     basePower: 5,
     attackKind: 'magic',
     range: 3,
@@ -659,7 +673,7 @@ export interface UnitSpawn {
   pos: GridCoord;
 }
 
-/** A ordem da lista é a ordem em que os inimigos ativam e a seleção padrão do jogador. */
+/** List order is the order enemies activate in and the player's default selection. */
 export const INITIAL_UNITS: UnitSpawn[] = [
   { id: 'knight-1', type: 'knight', team: 'player', pos: { x: 4, y: 1 } },
   { id: 'archer-1', type: 'archer', team: 'player', pos: { x: 2, y: 0 } },
@@ -684,8 +698,8 @@ export const CAMPAIGN_STAGES: StageConfig[] = [
   {
     stageNumber: 1,
     id: 'stage-1-outpost',
-    name: 'Posto Avançado',
-    subtitle: 'Ruínas da Muralha Central',
+    name: 'Outpost',
+    subtitle: 'Ruins of the Central Wall',
     mapId: 'ruins',
     isBossStage: false,
     heroSpawns: CAMPAIGN_HERO_SPAWNS,
@@ -698,8 +712,8 @@ export const CAMPAIGN_STAGES: StageConfig[] = [
   {
     stageNumber: 2,
     id: 'stage-2-swamp',
-    name: 'Pântano Esquecido',
-    subtitle: 'As Três Pontes da Névoa',
+    name: 'Forgotten Swamp',
+    subtitle: 'The Three Bridges of Mist',
     mapId: 'forgotten-swamp',
     isBossStage: false,
     heroSpawns: CAMPAIGN_HERO_SPAWNS,
@@ -714,8 +728,8 @@ export const CAMPAIGN_STAGES: StageConfig[] = [
   {
     stageNumber: 3,
     id: 'stage-3-fortress',
-    name: 'Fortaleza dos Ossos',
-    subtitle: 'Muralha de Escudos',
+    name: 'Fortress of Bones',
+    subtitle: 'Shield Wall',
     mapId: 'fortress',
     isBossStage: false,
     heroSpawns: CAMPAIGN_HERO_SPAWNS,
@@ -731,8 +745,8 @@ export const CAMPAIGN_STAGES: StageConfig[] = [
   {
     stageNumber: 4,
     id: 'stage-4-catacombs',
-    name: 'Catacumbas Arcanas',
-    subtitle: 'Conclave das Sombras',
+    name: 'Arcane Catacombs',
+    subtitle: 'Conclave of Shadows',
     mapId: 'catacombs',
     isBossStage: false,
     heroSpawns: CAMPAIGN_HERO_SPAWNS,
@@ -748,8 +762,8 @@ export const CAMPAIGN_STAGES: StageConfig[] = [
   {
     stageNumber: 5,
     id: 'stage-5-sanctuary',
-    name: 'Santuário Corrompido',
-    subtitle: 'Altar do Guardião das Cinzas',
+    name: 'Corrupted Sanctuary',
+    subtitle: 'Altar of the Ashen Guardian',
     mapId: 'corrupted-sanctuary',
     isBossStage: true,
     heroSpawns: CAMPAIGN_HERO_SPAWNS,

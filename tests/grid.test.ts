@@ -6,7 +6,7 @@ import { barrel, crate, meleeAt, pillar, unit, wall } from './helpers';
 const open = new GridSystem(8, []);
 
 describe('GridSystem', () => {
-  it('usa a grade e os obstáculos da config por padrão', () => {
+  it('uses config grid and obstacles by default', () => {
     const grid = new GridSystem();
     expect(grid.size).toBe(GRID_SIZE);
     for (const o of OBSTACLES) expect(grid.isObstacle(o.pos)).toBe(true);
@@ -14,7 +14,7 @@ describe('GridSystem', () => {
     expect(new GridSystem(8, [crate(3, 3)]).isObstacle({ x: 3, y: 3 })).toBe(true);
   });
 
-  it('aceita só coordenadas inteiras de 0 a 7', () => {
+  it('accepts only integer coordinates from 0 to 7', () => {
     expect(open.isInBounds({ x: 0, y: 0 })).toBe(true);
     expect(open.isInBounds({ x: 7, y: 7 })).toBe(true);
     expect(open.isInBounds({ x: -1, y: 0 })).toBe(false);
@@ -22,12 +22,12 @@ describe('GridSystem', () => {
     expect(open.isInBounds({ x: 1.5, y: 2 })).toBe(false);
   });
 
-  it('calcula a distância de Manhattan', () => {
+  it('computes Manhattan distance', () => {
     expect(manhattan({ x: 1, y: 1 }, { x: 4, y: 3 })).toBe(5);
     expect(manhattan({ x: 2, y: 2 }, { x: 3, y: 3 })).toBe(2);
   });
 
-  it('devolve só vizinhos ortogonais dentro da grade', () => {
+  it('returns only orthogonal neighbors within the grid', () => {
     expect(open.getNeighbors({ x: 0, y: 0 })).toEqual([
       { x: 0, y: 1 },
       { x: 1, y: 0 },
@@ -35,7 +35,7 @@ describe('GridSystem', () => {
     expect(open.getNeighbors({ x: 3, y: 3 })).toHaveLength(4);
   });
 
-  it('unidade viva ocupa a célula, unidade morta não', () => {
+  it('living unit occupies the cell, dead unit does not', () => {
     const alive = unit(meleeAt(2, 2));
     const dead = unit(meleeAt(3, 3, 'skeleton-2'), { alive: false, hp: 0 });
     expect(open.isOccupied({ x: 2, y: 2 }, [alive, dead])).toBe(true);
@@ -43,7 +43,7 @@ describe('GridSystem', () => {
     expect(open.isBlocked({ x: 3, y: 3 }, [alive, dead])).toBe(false);
   });
 
-  it('considera bloqueado o que está fora da grade, é obstáculo ou está ocupado', () => {
+  it('considers out of bounds, obstacle, or occupied cell as blocked', () => {
     const grid = new GridSystem(8, [wall(1, 1)]);
     const units = [unit(meleeAt(2, 2))];
     expect(grid.isBlocked({ x: 8, y: 0 }, units)).toBe(true);
@@ -54,7 +54,7 @@ describe('GridSystem', () => {
 });
 
 describe('GridSystem.getReachableCells', () => {
-  it('alcança as células a até `range` passos, sem a origem', () => {
+  it('reaches cells within `range` steps, excluding origin', () => {
     const from = { x: 3, y: 3 };
     const cells = open.getReachableCells(from, 2, []);
     expect(cells).toHaveLength(12);
@@ -69,7 +69,7 @@ describe('GridSystem.getReachableCells', () => {
     ]);
   });
 
-  it('não para em obstáculo nem em célula ocupada', () => {
+  it('does not stop on an obstacle or occupied cell', () => {
     const grid = new GridSystem(8, [crate(1, 0)]);
     const cells = grid.getReachableCells({ x: 0, y: 0 }, 2, [unit(meleeAt(0, 2))]);
     expect(cells).toEqual([
@@ -78,8 +78,8 @@ describe('GridSystem.getReachableCells', () => {
     ]);
   });
 
-  it('não atravessa obstáculos: contornar custa passos', () => {
-    // Parede em x=1 com passagem só em y=3.
+  it('does not pass through obstacles: detouring costs steps', () => {
+    // Wall at x=1 with passage only at y=3.
     const grid = new GridSystem(
       8,
       [0, 1, 2, 4, 5, 6, 7].map((y) => wall(1, y)),
@@ -88,8 +88,8 @@ describe('GridSystem.getReachableCells', () => {
     expect(grid.getReachableCells({ x: 0, y: 0 }, 8, [])).toContainEqual({ x: 2, y: 0 });
   });
 
-  it('não atravessa unidade viva, mas atravessa célula de unidade morta', () => {
-    // Corredor de uma célula de largura em y=0.
+  it('does not pass through living units, but passes through dead unit cells', () => {
+    // One-cell wide corridor at y=0.
     const grid = new GridSystem(
       8,
       [0, 1, 2, 3, 4, 5, 6, 7].map((x) => barrel(x, 1)),
@@ -114,11 +114,11 @@ describe('GridSystem.getPath', () => {
     for (let i = 1; i < path.length; i++) expect(manhattan(path[i - 1], path[i])).toBe(1);
   });
 
-  it('devolve só a origem quando origem e destino coincidem', () => {
+  it('returns only origin when origin and destination coincide', () => {
     expect(open.getPath({ x: 2, y: 2 }, { x: 2, y: 2 }, [])).toEqual([{ x: 2, y: 2 }]);
   });
 
-  it('contorna obstáculos e unidades vivas', () => {
+  it('routes around obstacles and living units', () => {
     const grid = new GridSystem(8, [crate(1, 0)]);
     const blocker = unit(meleeAt(1, 1));
     const path = grid.getPath({ x: 0, y: 0 }, { x: 2, y: 0 }, [blocker])!;
@@ -127,7 +127,7 @@ describe('GridSystem.getPath', () => {
     expect(path).toHaveLength(7);
   });
 
-  it('devolve null se o destino é obstáculo, está ocupado ou fica fora da grade', () => {
+  it('returns null if destination is an obstacle, occupied, or out of bounds', () => {
     const grid = new GridSystem(8, [pillar(4, 4)]);
     const units = [unit(meleeAt(5, 5))];
     expect(grid.getPath({ x: 0, y: 0 }, { x: 4, y: 4 }, units)).toBeNull();
@@ -136,7 +136,7 @@ describe('GridSystem.getPath', () => {
     expect(grid.getPath({ x: -1, y: 0 }, { x: 1, y: 0 }, units)).toBeNull();
   });
 
-  it('devolve null se o destino está cercado', () => {
+  it('returns null if destination is surrounded', () => {
     const grid = new GridSystem(8, [wall(1, 0), crate(0, 1)]);
     expect(grid.getPath({ x: 5, y: 5 }, { x: 0, y: 0 }, [])).toBeNull();
   });
@@ -145,7 +145,7 @@ describe('GridSystem.getPath', () => {
 describe('GridSystem.hasLineOfSight', () => {
   const from = { x: 0, y: 0 };
 
-  it('é livre em campo aberto e para a própria célula', () => {
+  it('is clear in open field and for own cell', () => {
     expect(open.hasLineOfSight(from, { x: 7, y: 7 })).toBe(true);
     expect(open.hasLineOfSight(from, { x: 5, y: 2 })).toBe(true);
     expect(open.hasLineOfSight(from, from)).toBe(true);
@@ -156,37 +156,37 @@ describe('GridSystem.hasLineOfSight', () => {
     ['pillar', pillar, false],
     ['crate', crate, true],
     ['barrel', barrel, true],
-  ] as const)('%s no meio da linha: visão %s', (_kind, make, expected) => {
+  ] as const)('%s in the middle of the line: LoS %s', (_kind, make, expected) => {
     expect(new GridSystem(8, [make(1, 0)]).hasLineOfSight(from, { x: 3, y: 0 })).toBe(expected);
     expect(new GridSystem(8, [make(0, 2)]).hasLineOfSight(from, { x: 0, y: 3 })).toBe(expected);
     expect(new GridSystem(8, [make(1, 1)]).hasLineOfSight(from, { x: 2, y: 2 })).toBe(expected);
   });
 
-  it('origem e destino não bloqueiam por si mesmos', () => {
+  it('origin and destination do not block by themselves', () => {
     const grid = new GridSystem(8, [wall(0, 0), wall(3, 0)]);
     expect(grid.hasLineOfSight(from, { x: 3, y: 0 })).toBe(true);
   });
 
-  it('obstáculo fora da linha não bloqueia', () => {
+  it('obstacle outside the line does not block', () => {
     const grid = new GridSystem(8, [wall(1, 1), wall(2, 1), wall(0, 1)]);
     expect(grid.hasLineOfSight(from, { x: 3, y: 0 })).toBe(true);
   });
 
-  it('linha inclinada é bloqueada por qualquer célula que ela atravessa', () => {
-    // De (0,0) a (2,1) a linha atravessa (1,0) e (1,1), e não toca (2,0) nem (0,1).
+  it('diagonal line is blocked by any cell it crosses', () => {
+    // From (0,0) to (2,1) the line crosses (1,0) and (1,1), and touches neither (2,0) nor (0,1).
     const to = { x: 2, y: 1 };
     expect(new GridSystem(8, [wall(1, 0)]).hasLineOfSight(from, to)).toBe(false);
     expect(new GridSystem(8, [wall(1, 1)]).hasLineOfSight(from, to)).toBe(false);
     expect(new GridSystem(8, [wall(2, 0), wall(0, 1)]).hasLineOfSight(from, to)).toBe(true);
   });
 
-  it('passa entre dois obstáculos que só se tocam pelo canto', () => {
+  it('passes between two obstacles that only touch at a corner', () => {
     const grid = new GridSystem(8, [wall(1, 0), wall(0, 1)]);
     expect(grid.hasLineOfSight(from, { x: 1, y: 1 })).toBe(true);
     expect(grid.hasLineOfSight(from, { x: 3, y: 3 })).toBe(true);
   });
 
-  it('é simétrica', () => {
+  it('is symmetric', () => {
     const grid = new GridSystem();
     for (let i = 0; i < 64; i++) {
       for (let j = i + 1; j < 64; j++) {
@@ -197,7 +197,7 @@ describe('GridSystem.hasLineOfSight', () => {
     }
   });
 
-  it('aceita uma lista de obstáculos explícita', () => {
+  it('accepts an explicit obstacle list', () => {
     expect(open.hasLineOfSight(from, { x: 3, y: 0 }, [wall(2, 0)])).toBe(false);
     expect(open.hasLineOfSight(from, { x: 3, y: 0 }, [crate(2, 0)])).toBe(true);
   });
